@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# Install Game Server
+# Install Minecraft Server
 #
 # Please ensure to run this script as root (or at least with sudo)
 #
@@ -8,10 +8,10 @@
 # @AUTHOR  Charlie Powell <cdp1337@bitsnbytes.dev>
 # @CATEGORY Game Server
 # @TRMM-TIMEOUT 600
-# @WARLOCK-TITLE VEIN
-# @WARLOCK-IMAGE media/some-game-image.webp
-# @WARLOCK-ICON media/some-game-icon.webp
-# @WARLOCK-THUMBNAIL media/some-game-thumbnail.webp
+# @WARLOCK-TITLE Minecraft
+# @WARLOCK-IMAGE media/minecraft-1280x720.webp
+# @WARLOCK-ICON media/minecraft-128x128.webp
+# @WARLOCK-THUMBNAIL media/minecraft-713x499.webp
 #
 # Supports:
 #   Debian 12, 13
@@ -38,23 +38,15 @@
 ############################################
 
 # Name of the game (used to create the directory)
-INSTALLER_VERSION="v20251120~DEV"
-GAME="VEIN"
-GAME_DESC="VEIN Dedicated Server"
-REPO="BitsNBytes25/VEIN-Dedicated-Server"
-WARLOCK_GUID="acdf1bec-2906-c20f-5a59-b0df072c29e8"
-# Steam ID of the game
-STEAM_ID="2131400"
-GAME_USER="steam"
-GAME_DIR="/home/${GAME_USER}/${GAME}"
-GAME_SERVICE="vein-server"
-# Force installation directory for game
-# steam produces varying results, sometimes in ~/.local/share/Steam, other times in ~/Steam
-STEAM_DIR="/home/${GAME_USER}/.local/share/Steam"
-# VEIN uses the default Epic save handler which stores saves in ~/.config
-SAVE_DIR="/home/${GAME_USER}/.config/Epic/Vein/Saved/SaveGames/"
-#PORT_GAME=7777
-#PORT_QUERY=27015
+INSTALLER_VERSION="v20251127~DEV"
+GAME="Minecraft"
+GAME_DESC="Minecraft Dedicated Server"
+REPO="BitsNBytes25/Minecraft-Installer"
+WARLOCK_GUID="700798f0-35be-bc6c-da84-62c510dfbd06"
+GAME_USER="minecraft"
+GAME_DIR="/home/${GAME_USER}"
+GAME_SERVICE="minecraft-server"
+GAME_SOURCE="https://piston-data.mojang.com/v1/objects/95495a7f485eedd84ce928cef5e223b757d2f764/server.jar"
 
 # compile:usage
 # compile:argparse
@@ -98,7 +90,9 @@ function install_application() {
 
 	# Preliminary requirements
 	# VEIN needs ALSA and PulseAudio libraries to run
-	package_install curl sudo libasound2-data libpulse0 python3-venv
+	package_install curl sudo default-jdk python3-venv
+
+	java -version
 
 	if [ "$FIREWALL" == "1" ]; then
 		if [ "$(get_enabled_firewall)" == "none" ]; then
@@ -107,45 +101,22 @@ function install_application() {
 		fi
 	fi
 
-	# Install steam binary and steamcmd
-	install_steamcmd
+	[ -e "$GAME_DIR/AppFiles" ] || sudo -u $GAME_USER mkdir -p "$GAME_DIR/AppFiles"
 
-	if ! sudo -u $GAME_USER /usr/games/steamcmd +force_install_dir "$GAME_DIR/AppFiles" +login anonymous +app_update $STEAM_ID validate +quit; then
+	if ! download "$GAME_SOURCE" "$GAME_DIR/AppFiles/minecraft_server.jar"; then
 		echo "Could not install $GAME_DESC, exiting" >&2
 		exit 1
 	fi
-
-	# VEIN requires the Steam client binary to be loaded into the game server
-	[ -h "$GAME_DIR/AppFiles/Vein/Binaries/Linux/steamclient.so" ] || \
-		sudo -u $GAME_USER \
-		ln -s /home/$GAME_USER/.steam/steam/steamcmd/linux64/steamclient.so "$GAME_DIR/AppFiles/Vein/Binaries/Linux/steamclient.so"
 
 	# Install system service file to be loaded by systemd
     cat > /etc/systemd/system/${GAME_SERVICE}.service <<EOF
 # script:systemd-template.service
 EOF
     systemctl daemon-reload
-    systemctl enable $GAME_SERVICE
+    # systemctl enable $GAME_SERVICE
 
     # Ensure necessary directories exist
-    [ -d "$SAVE_DIR" ] || sudo -u $GAME_USER mkdir -p "$SAVE_DIR"
-
-    # Ensure game configurations exist, (for convenience)
-    [ -e "$GAME_DIR/AppFiles/Vein/Saved/Config/LinuxServer" ] || \
-    	sudo -u $GAME_USER mkdir -p "$GAME_DIR/AppFiles/Vein/Saved/Config/LinuxServer"
-	[ -e "$GAME_DIR/AppFiles/Vein/Saved/Config/LinuxServer/Game.ini" ] || \
-		sudo -u $GAME_USER touch "$GAME_DIR/AppFiles/Vein/Saved/Config/LinuxServer/Game.ini"
-	[ -e "$GAME_DIR/AppFiles/Vein/Saved/Config/LinuxServer/GameUserSettings.ini" ] || \
-		sudo -u $GAME_USER touch "$GAME_DIR/AppFiles/Vein/Saved/Config/LinuxServer/GameUserSettings.ini"
-
-	# Symlink for convenience
-	[ -h "$GAME_DIR/Game.ini" ] || \
-		sudo -u $GAME_USER ln -s "$GAME_DIR/AppFiles/Vein/Saved/Config/LinuxServer/Game.ini" "$GAME_DIR/Game.ini"
-	[ -h "$GAME_DIR/GameUserSettings.ini" ] || \
-		sudo -u $GAME_USER ln -s "$GAME_DIR/AppFiles/Vein/Saved/Config/LinuxServer/GameUserSettings.ini" "$GAME_DIR/GameUserSettings.ini"
-	[ -h "$GAME_DIR/SaveGames" ] || sudo -u $GAME_USER ln -s "$SAVE_DIR" "$GAME_DIR/SaveGames"
-	[ -h "$GAME_DIR/Vein.log" ] || \
-		sudo -u $GAME_USER ln -s "$GAME_DIR/AppFiles/Vein/Saved/Logs/Vein.log" "$GAME_DIR/Vein.log"
+    #[ -d "$SAVE_DIR" ] || sudo -u $GAME_USER mkdir -p "$SAVE_DIR"
 
 	if [ -n "$WARLOCK_GUID" ]; then
 		# Register Warlock
@@ -262,21 +233,21 @@ fi
 if [ -n "$OVERRIDE_DIR" ]; then
 	# User requested to change the install dir!
 	# This changes the GAME_DIR from the default location to wherever the user requested.
-	if [ -e "/etc/systemd/system/${GAME_SERVICE}.service" ]; then
-    	# Check for existing installation directory based on service file
-    	GAME_DIR="$(egrep '^WorkingDirectory' "/etc/systemd/system/${GAME_SERVICE}.service" | sed 's:.*=\(.*\)/AppFiles.*:\1:')"
-    	if [ "$GAME_DIR" != "$OVERRIDE_DIR" ]; then
-    		echo "ERROR: $GAME_DESC already installed in $GAME_DIR, cannot override to $OVERRIDE_DIR" >&2
-    		echo "If you want to move the installation, please uninstall first and then re-install to the new location." >&2
-    		exit 1
+	if [ -e "/var/lib/warlock/${WARLOCK_GUID}.app" ] ; then
+		# Check for existing installation directory based on Warlock registration
+		GAME_DIR="$(cat "/var/lib/warlock/${WARLOCK_GUID}.app")"
+		if [ "$GAME_DIR" != "$OVERRIDE_DIR" ]; then
+			echo "ERROR: $GAME_DESC already installed in $GAME_DIR, cannot override to $OVERRIDE_DIR" >&2
+			echo "If you want to move the installation, please uninstall first and then re-install to the new location." >&2
+			exit 1
 		fi
 	fi
 
 	GAME_DIR="$OVERRIDE_DIR"
 	echo "Using ${GAME_DIR} as the installation directory based on explicit argument"
-elif [ -e "/etc/systemd/system/${GAME_SERVICE}.service" ]; then
+elif [ -e "/var/lib/warlock/${WARLOCK_GUID}.app" ]; then
 	# Check for existing installation directory based on service file
-	GAME_DIR="$(egrep '^WorkingDirectory' "/etc/systemd/system/${GAME_SERVICE}.service" | sed 's:.*=\(.*\)/AppFiles.*:\1:')"
+	GAME_DIR="$(cat "/var/lib/warlock/${WARLOCK_GUID}.app")"
 	echo "Detected installation directory of ${GAME_DIR} based on service registration"
 else
 	echo "Using default installation directory of ${GAME_DIR}"
@@ -286,16 +257,6 @@ if [ -e "/etc/systemd/system/${GAME_SERVICE}.service" ]; then
 	EXISTING=1
 else
 	EXISTING=0
-fi
-
-if [ -e "/etc/systemd/system/${GAME_SERVICE}.service" ]; then
-	if egrep -q '^ExecStartPre=.*-beta ' "/etc/systemd/system/${GAME_SERVICE}.service"; then
-		BETA="$(egrep '^ExecStartPre=.*-beta ' "/etc/systemd/system/${GAME_SERVICE}.service" | sed 's:.*-beta \([^ ]*\) .*:\1:')"
-	else
-		BETA=""
-	fi
-else
-	BETA=""
 fi
 
 ############################################
@@ -311,30 +272,6 @@ if [ "$MODE" == "install" ]; then
 		FIREWALL=1
 	else
 		FIREWALL=0
-	fi
-
-	if [ -n "$USE_BRANCH" ]; then
-		# User requested a specific branch
-		if [ "$USE_BRANCH" == "stable" ]; then
-			BETA=""
-		else
-			BETA="$USE_BRANCH"
-		fi
-	elif [ -n "$BETA" ]; then
-		echo "Using beta branch $BETA"
-		if prompt_yn -q --default-no "Switch to stable branch?"; then
-			BETA=""
-		fi
-	else
-		if prompt_yn -q --default-no "Install experimental branch?"; then
-			BETA="experimental"
-		fi
-	fi
-
-	if [ -n "$BETA" ]; then
-		STEAMBETABRANCH=" -beta $BETA"
-	else
-		STEAMBETABRANCH=""
 	fi
 
 	install_application

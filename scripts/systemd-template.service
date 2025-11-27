@@ -11,10 +11,7 @@ User=$GAME_USER
 Group=$GAME_USER
 WorkingDirectory=$GAME_DIR/AppFiles
 Environment=XDG_RUNTIME_DIR=/run/user/$(id -u $GAME_USER)
-# Only required for games which utilize Proton
-#Environment="STEAM_COMPAT_CLIENT_INSTALL_PATH=$STEAM_DIR"
-ExecStartPre=/usr/games/steamcmd +force_install_dir $GAME_DIR/AppFiles +login anonymous +app_update ${STEAM_ID}${STEAMBETABRANCH} validate +quit
-ExecStart=$GAME_DIR/AppFiles/Game-Executable.bin
+ExecStart=/usr/bin/java -Xmx1G -Xms2G -jar minecraft_server.jar nogui
 ExecStop=$GAME_DIR/manage.py --pre-stop --service ${GAME_SERVICE}
 ExecStartPost=$GAME_DIR/manage.py --post-start --service ${GAME_SERVICE}
 Restart=on-failure
