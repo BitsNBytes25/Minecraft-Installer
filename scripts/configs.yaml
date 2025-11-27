@@ -1,0 +1,134 @@
+game:
+  - name: APIPort
+    section: "/Script/Vein.VeinGameSession"
+    key: HTTPPort
+    default: ""
+    type: int
+    help: "The port for the server API. Leave blank to disable."
+  - name: Public
+    section: "/Script/Vein.VeinGameSession"
+    key: bPublic
+    default: "true"
+    type: bool
+    help: "Make the server publicly visible in server browsers."
+  - name: GamePort
+    section: URL
+    key: Port
+    default: "7777"
+    type: int
+    help: "The main port for game connections."
+  - name: MaxPlayers
+    section: "/Script/Engine.GameSession"
+    key: MaxPlayers
+    default: "16"
+    type: int
+    help: "Maximum number of players allowed on the server."
+  - name: ServerDescription
+    section: "/Script/Vein.VeinGameSession"
+    key: ServerDescription
+    default: "Short description of your server and your community"
+    type: text
+    help: "A brief description of your server that appears in server browsers."
+  - name: ServerName
+    section: "/Script/Vein.VeinGameSession"
+    key: ServerName
+    default: "My Vein Server"
+    type: str
+    help: "The name of your server as it appears in server browsers."
+  - name: ServerPassword
+    section: "/Script/Vein.VeinGameSession"
+    key: Password
+    default: ""
+    type: str
+    help: "Password required to join the server. Leave blank for no password."
+  - name: SteamQueryPort
+    section: OnlineSubsystemSteam
+    key: GameServerQueryPort
+    default: "27015"
+    type: int
+    help: "The Steam query port for server listing and queries."
+  - name: VACEnabled
+    section: OnlineSubsystemSteam
+    key: bVACEnabled
+    default: "false"
+    type: bool
+    help: "Enable Valve Anti-Cheat (VAC) on the server."
+engine:
+  - name: AISpawner
+    section: ConsoleVariables
+    key: vein.AISpawner.Enabled
+    default: "true"
+    type: bool
+    help: "Enable or disable AI spawners on the server."
+  - name: PVPEnabled
+    section: ConsoleVariables
+    key: vein.PvP
+    default: "true"
+    type: bool
+    help: "Enable or disable PvP mode on the server."
+manager:
+  - name: Shutdown Warning 5 Minutes
+    section: Messages
+    key: shutdown_5min
+    type: str
+    default: Server is shutting down in 5 minutes
+    help: "Custom message broadcasted to players 5 minutes before server shutdown."
+  - name: Shutdown Warning 4 Minutes
+    section: Messages
+    key: shutdown_4min
+    type: str
+    default: Server is shutting down in 4 minutes
+    help: "Custom message broadcasted to players 4 minutes before server shutdown."
+  - name: Shutdown Warning 3 Minutes
+    section: Messages
+    key: shutdown_3min
+    type: str
+    default: Server is shutting down in 3 minutes
+    help: "Custom message broadcasted to players 3 minutes before server shutdown."
+  - name: Shutdown Warning 2 Minutes
+    section: Messages
+    key: shutdown_2min
+    type: str
+    default: Server is shutting down in 2 minutes
+    help: "Custom message broadcasted to players 2 minutes before server shutdown."
+  - name: Shutdown Warning 1 Minute
+    section: Messages
+    key: shutdown_1min
+    type: str
+    default: Server is shutting down in 1 minute
+    help: "Custom message broadcasted to players 1 minute before server shutdown."
+  - name: Shutdown Warning 30 Seconds
+    section: Messages
+    key: shutdown_30sec
+    type: str
+    default: Server is shutting down in 30 seconds!
+    help: "Custom message broadcasted to players 30 seconds before server shutdown."
+  - name: Shutdown Warning NOW
+    section: Messages
+    key: shutdown_now
+    type: str
+    default: Server is shutting down NOW!
+    help: "Custom message broadcasted to players immediately before server shutdown."
+  - name: Instance Started (Discord)
+    section: Discord
+    key: instance_started
+    type: str
+    default: "{instance} has started! :rocket:"
+    help: "Custom message sent to Discord when the server starts, use '{instance}' to insert the map name"
+  - name: Instance Stopping (Discord)
+    section: Discord
+    key: instance_stopping
+    type: str
+    default: ":small_red_triangle_down: {instance} is shutting down"
+    help: "Custom message sent to Discord when the server stops, use '{instance}' to insert the map name"
+  - name: Discord Enabled
+    section: Discord
+    key: enabled
+    type: bool
+    default: false
+    help: "Enables or disables Discord integration for server status updates."
+  - name: Discord Webhook URL
+    section: Discord
+    key: webhook
+    type: str
+    help: "The webhook URL for sending server status updates to a Discord channel."
