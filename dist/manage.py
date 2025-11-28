@@ -2622,7 +2622,7 @@ class GameApp(BaseApp):
 
 		:return:
 		"""
-		files = ['banned-ips.json', 'banned-players.json', 'ops.json', 'whitelist.json', 'server.properties']
+		files = ['banned-ips.json', 'banned-players.json', 'ops.json', 'whitelist.json']
 		for service in self.get_services():
 			files.append(service.get_name())
 		return files
