@@ -80,15 +80,14 @@ print_header "$GAME_DESC *unofficial* Installer ${INSTALLER_VERSION}"
 function install_application() {
 	print_header "Performing install_application"
 
-	# Create a "steam" user account
+	# Create the game user account
 	# This will create the account with no password, so if you need to log in with this user,
-	# run `sudo passwd steam` to set a password.
+	# run `sudo passwd $GAME_USER` to set a password.
 	if [ -z "$(getent passwd $GAME_USER)" ]; then
 		useradd -m -U $GAME_USER
 	fi
 
 	# Preliminary requirements
-	# VEIN needs ALSA and PulseAudio libraries to run
 	package_install curl sudo default-jdk python3-venv
 
 	java -version
@@ -121,10 +120,6 @@ function install_application() {
 # script:systemd-template.service
 EOF
     systemctl daemon-reload
-    # systemctl enable $GAME_SERVICE
-
-    # Ensure necessary directories exist
-    #[ -d "$SAVE_DIR" ] || sudo -u $GAME_USER mkdir -p "$SAVE_DIR"
 
 	if [ -n "$WARLOCK_GUID" ]; then
 		# Register Warlock
@@ -282,15 +277,6 @@ if [ "$MODE" == "install" ]; then
 
 	# Print some instructions and useful tips
     print_header "$GAME_DESC Installation Complete"
-    echo 'Game server will auto-update on restarts and will auto-start on server boot.'
-    echo ''
-    echo "Game files:     $GAME_DIR/AppFiles/"
-    echo "Game settings:  $GAME_DIR/Game.ini"
-    echo "GUS settings:   $GAME_DIR/GameUserSettings.ini"
-    echo "Log:            $GAME_DIR/Vein.log"
-    echo ''
-    echo "Next steps: configure your server by running"
-    echo "sudo $GAME_DIR/manage.py"
 fi
 
 if [ "$MODE" == "uninstall" ]; then
