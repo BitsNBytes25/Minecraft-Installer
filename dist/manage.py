@@ -381,16 +381,28 @@ class BaseApp:
 
 	def __init__(self):
 		self.name = ''
+		"""
+		:type str:
+		Short name for this game
+		"""
+
 		self.desc = ''
-		self.steam_id = ''
+		"""
+		:type str:
+		Description / full name of this game
+		"""
 
 		self.services = []
 		"""
-		:type list<BaseService>:
+		:type list<str>:
 		List of available services (instances) for this game
 		"""
 
 		self._svcs = None
+		"""
+		:type list<BaseService>:
+		Cached list of service instances for this game
+		"""
 
 		self.configs = {}
 		"""
@@ -661,6 +673,18 @@ class BaseApp:
 				dst = os.path.join(temp_store, 'config', os.path.basename(src))
 				shutil.copy(src, dst)
 
+		# Include service-specific configuration files too
+		for svc in self.get_services():
+			p = os.path.join(temp_store, svc.service)
+			if not os.path.exists(p):
+				os.makedirs(p)
+			for cfg in svc.configs.values():
+				src = cfg.path
+				if src and os.path.exists(src):
+					print('Backing up configuration file: %s' % src)
+					dst = os.path.join(p, os.path.basename(src))
+					shutil.copy(src, dst)
+
 		# Copy save files if specified
 		if save_source and save_files:
 			for f in save_files:
@@ -797,6 +821,20 @@ class BaseApp:
 					shutil.copy(src, dst)
 					if uid is not None:
 						os.chown(dst, uid, gid)
+
+		# Include service-specific configuration files too
+		for svc in self.get_services():
+			p = os.path.join(temp_store, svc.service)
+			if os.path.exists(p):
+				for cfg in svc.configs.values():
+					dst = cfg.path
+					if dst:
+						src = os.path.join(p, os.path.basename(dst))
+						if os.path.exists(src):
+							print('Restoring configuration file: %s' % dst)
+							shutil.copy(src, dst)
+							if uid is not None:
+								os.chown(dst, uid, gid)
 
 		# If the save destination is specified, perform those files/directories too.
 		if save_dest:
@@ -1329,6 +1367,21 @@ class BaseService:
 			stdout=subprocess.PIPE
 		).stdout.decode()
 
+	def send_message(self, message: str):
+		"""
+		Send a message to all players via the game API
+		:param message:
+		:return:
+		"""
+		pass
+
+	def save_world(self):
+		"""
+		Force a world save via the game API
+		:return:
+		"""
+		pass
+
 	def post_start(self) -> bool:
 		"""
 		Perform the necessary operations for after a game has started
@@ -1424,7 +1477,71 @@ class BaseService:
 		Called automatically via systemd
 		:return:
 		"""
-		pass
+		# Send a message to Discord that the instance is stopping
+		msg = self.game.get_option_value('Instance Stopping (Discord)')
+		if msg != '':
+			if '{instance}' in msg:
+				msg = msg.replace('{instance}', self.get_name())
+			self.game.send_discord_message(msg)
+
+		# Send message to players in-game that the server is shutting down,
+		# (only if the API is available)
+		if self.is_api_enabled():
+			timers = (
+				(self.game.get_option_value('Shutdown Warning 5 Minutes'), 60),
+				(self.game.get_option_value('Shutdown Warning 4 Minutes'), 60),
+				(self.game.get_option_value('Shutdown Warning 3 Minutes'), 60),
+				(self.game.get_option_value('Shutdown Warning 2 Minutes'), 60),
+				(self.game.get_option_value('Shutdown Warning 1 Minute'), 30),
+				(self.game.get_option_value('Shutdown Warning 30 Seconds'), 30),
+				(self.game.get_option_value('Shutdown Warning NOW'), 0),
+			)
+			for timer in timers:
+				players = self.get_player_count()
+				if players is not None and players > 0:
+					print('Players are online, sending warning message: %s' % timer[0])
+					self.send_message(timer[0])
+					if timer[1]:
+						time.sleep(timer[1])
+				else:
+					break
+
+		# Force a world save before stopping, if the API is available
+		if self.is_api_enabled():
+			print('Forcing server save')
+			self.save_world()
+			time.sleep(5)
+
+		return True
+
+	def post_start(self) -> bool:
+		"""
+		Perform the necessary operations for after a game has started
+		:return:
+		"""
+		if self.is_api_enabled():
+			counter = 0
+			print('Waiting for API to become available...')
+			while counter < 24:
+				players = self.get_player_count()
+				if players is not None:
+					msg = self.game.get_option_value('Instance Started (Discord)')
+					if msg != '':
+						if '{instance}' in msg:
+							msg = msg.replace('{instance}', self.get_name())
+						self.game.send_discord_message(msg)
+					return True
+				else:
+					print('API not available yet')
+
+				time.sleep(10)
+				counter += 1
+
+			print('API did not reply within the allowed time!', file=sys.stderr)
+			return False
+		else:
+			# API not available, so nothing to check.
+			return True
 
 	def stop(self):
 		"""
@@ -2472,32 +2589,6 @@ here = os.path.dirname(os.path.realpath(__file__))
 IS_SUDO = os.geteuid() == 0
 
 
-def format_seconds(seconds: int) -> dict:
-	hours = int(seconds // 3600)
-	minutes = int((seconds - (hours * 3600)) // 60)
-	seconds = int(seconds % 60)
-
-	short_minutes = ('0' + str(minutes)) if minutes < 10 else str(minutes)
-	short_seconds = ('0' + str(seconds)) if seconds < 10 else str(seconds)
-
-	if hours > 0:
-		short = '%s:%s:%s' % (str(hours), short_minutes, short_seconds)
-	else:
-		short = '%s:%s' % (str(minutes), short_seconds)
-
-	return {
-		'h': hours,
-		'm': minutes,
-		's': seconds,
-		'full': '%s hrs %s min %s sec' % (str(hours), str(minutes), str(seconds)),
-		'short': short
-	}
-
-
-class GameAPIException(Exception):
-	pass
-
-
 class GameApp(BaseApp):
 	"""
 	Game application manager
@@ -2622,7 +2713,7 @@ class GameService(RCONService):
 				return int(ret[10:ret.index(' of a max')].strip())
 			else:
 				return None
-		except GameAPIException:
+		except:
 			return None
 
 	def get_player_max(self) -> int:
@@ -2663,70 +2754,12 @@ class GameService(RCONService):
 		"""
 		self._api_cmd('/say %s' % message)
 
-	def post_start(self) -> bool:
+	def save_world(self):
 		"""
-		Perform the necessary operations for after a game has started
+		Force the game server to save the world via the game API
 		:return:
 		"""
-		if self.is_api_enabled():
-			counter = 0
-			print('Waiting for API to become available...')
-			while counter < 24:
-				players = self.get_player_count()
-				if players is not None:
-					msg = self.game.get_option_value('Instance Started (Discord)')
-					if '{instance}' in msg:
-						msg = msg.replace('{instance}', self.get_name())
-					self.game.send_discord_message(msg)
-					return True
-				else:
-					print('API not available yet')
-
-				time.sleep(10)
-				counter += 1
-
-			print('API did not reply within the allowed time!', file=sys.stderr)
-			return False
-		else:
-			# API not available, so nothing to check.
-			return True
-
-	def pre_stop(self) -> bool:
-		"""
-		Perform operations necessary for safely stopping a server
-
-		Called automatically via systemd
-		:return:
-		"""
-		msg = self.game.get_option_value('Instance Stopping (Discord)')
-		if '{instance}' in msg:
-			msg = msg.replace('{instance}', self.get_name())
-		self.game.send_discord_message(msg)
-
-		if self.is_api_enabled():
-			timers = (
-				(self.game.get_option_value('Shutdown Warning 5 Minutes'), 60),
-				(self.game.get_option_value('Shutdown Warning 4 Minutes'), 60),
-				(self.game.get_option_value('Shutdown Warning 3 Minutes'), 60),
-				(self.game.get_option_value('Shutdown Warning 2 Minutes'), 60),
-				(self.game.get_option_value('Shutdown Warning 1 Minute'), 30),
-				(self.game.get_option_value('Shutdown Warning 30 Seconds'), 30),
-				(self.game.get_option_value('Shutdown Warning NOW'), 0),
-			)
-			for timer in timers:
-				players = self.get_player_count()
-				if players is not None and players > 0:
-					print('Players are online, sending warning message: %s' % timer[0])
-					self.send_message(timer[0])
-					if timer[1]:
-						time.sleep(timer[1])
-				else:
-					break
-
-			print('Forcing server save')
-			self._api_cmd('save-all flush')
-			time.sleep(5)
-		return True
+		self._api_cmd('save-all flush')
 
 
 def menu_first_run(game: GameApp):
