@@ -1320,7 +1320,7 @@ function postinstall() {
 }
 
 ##
-# Uninstall the VEIN game server
+# Uninstall the game server
 #
 # Expects the following variables:
 #   GAME_DIR     - Directory where the game is installed
@@ -1332,15 +1332,6 @@ function uninstall_application() {
 
 	systemctl disable $GAME_SERVICE
 	systemctl stop $GAME_SERVICE
-
-	# Save directory, (usually outside of GAME_DIR)
-	[ -n "$SAVE_DIR" -a -d "$SAVE_DIR" ] && rm -fr "$SAVE_DIR"
-
-	# Symlinks
-	[ -h "$GAME_DIR/Game.ini" ] && unlink "$GAME_DIR/Game.ini"
-	[ -h "$GAME_DIR/GameUserSettings.ini" ] && unlink "$GAME_DIR/GameUserSettings.ini"
-	[ -h "$GAME_DIR/SaveGames" ] && unlink "$GAME_DIR/SaveGames"
-	[ -h "$GAME_DIR/Vein.log" ] && unlink "$GAME_DIR/Vein.log"
 
 	# Service files
 	[ -e "/etc/systemd/system/${GAME_SERVICE}.service" ] && rm "/etc/systemd/system/${GAME_SERVICE}.service"
