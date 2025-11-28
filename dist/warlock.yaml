@@ -12,7 +12,6 @@
     - "--uninstall  - Perform an uninstallation"
     - "--dir=<path> - Use a custom installation directory instead of the default (optional)"
     - "--skip-firewall  - Do not install or configure a system firewall"
-    - "--branch=<stable|experimental> - Install a different branch from Steam (optional)"
     - "--non-interactive  - Run the installer in non-interactive mode (useful for scripted installs)"
   image: media/minecraft-1280x720.webp
   icon: media/minecraft-128x128.webp

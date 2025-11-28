@@ -25,10 +25,11 @@ import yaml
 import datetime
 import json
 import shutil
+from rcon.source import Client
+from rcon import SessionTimeout
+from rcon.exceptions import WrongPassword
 import time
 import configparser
-from pathlib import Path
-from typing import List
 import argparse
 import re
 
@@ -770,7 +771,18 @@ class BaseService:
 		"""
 		self.service = service
 		self.game = game
+		self.configured = False
 		self.configs = {}
+
+	def load(self):
+		"""
+		Load the configuration files
+		:return:
+		"""
+		for config in self.configs.values():
+			if config.exists():
+				config.load()
+				self.configured = True
 
 	def get_options(self) -> list:
 		"""
@@ -882,6 +894,20 @@ class BaseService:
 
 		print('Invalid option: %s, not present in service configuration!' % option, file=sys.stderr)
 		return False
+
+	def get_name(self) -> str:
+		"""
+		Get the display name of this service
+		:return:
+		"""
+		return self.service
+
+	def get_port(self) -> Union[int, None]:
+		"""
+		Get the primary port of the service, or None if not applicable
+		:return:
+		"""
+		return None
 
 	def prompt_option(self, option: str):
 		"""
@@ -1328,60 +1354,48 @@ class BaseService:
 		self.start()
 
 
-class HTTPService(BaseService):
+class RCONService(BaseService):
+	#def __init__(self, service: str, game: BaseGameApp):
+	#	super().__init__(service, game)
 
-	def __init__(self, service: str, game: BaseApp):
-		super().__init__(service, game)
+	def _rcon_cmd(self, cmd) -> Union[None,str]:
+		"""
+		Execute a raw command with RCON and return the result
 
-	def _http_cmd(self, cmd: str, method: str = 'GET', data: dict = None):
-		method = method.upper()
-
-		if not (self.is_running() or self.is_stopping):
+		:param cmd:
+		:return: None if RCON not available, or the result of the command
+		"""
+		if not (self.is_running() or self.is_starting() or self.is_stopping()):
 			# If service is not running, don't even try to connect.
 			return None
 
 		if not self.is_api_enabled():
-			# No REST API enabled, unable to retrieve any data
+			# RCON is not available due to settings
 			return None
 
-		req = request.Request(
-			'http://127.0.0.1:%s%s' % (str(self.get_api_port()), cmd),
-			headers={
-				'Content-Type': 'application/json; charset=utf-8',
-				'Accept': 'application/json',
-			},
-			method=method
-		)
 		try:
-			if method == 'POST' and data is not None:
-				data = bytearray(json.dumps(data), 'utf-8')
-				req.add_header('Content-Length', str(len(data)))
-				with request.urlopen(req, data) as resp:
-					ret = resp.read().decode('utf-8')
-					if ret == '':
-						return None
-					else:
-						return json.loads(ret)
-			else:
-				with request.urlopen(req) as resp:
-					ret = resp.read().decode('utf-8')
-					if ret == '':
-						return None
-					else:
-						return json.loads(ret)
+			with Client('127.0.0.1', self.get_api_port(), passwd=self.get_api_password(), timeout=2) as client:
+				return client.run(cmd).strip()
 		except:
 			return None
 
 	def is_api_enabled(self) -> bool:
 		"""
-		Check if HTTP API is enabled for this service
+		Check if RCON is enabled for this service
 		:return:
 		"""
 		pass
 
 	def get_api_port(self) -> int:
 		"""
-		Get the HTTP API port from the service configuration
+		Get the RCON port from the service configuration
+		:return:
+		"""
+		pass
+
+	def get_api_password(self) -> str:
+		"""
+		Get the RCON password from the service configuration
 		:return:
 		"""
 		pass
@@ -1686,526 +1700,15 @@ class INIConfig(BaseConfig):
 					break
 				check_path = os.path.dirname(check_path)
 
-class UnrealConfigParser:
+class PropertiesConfig(BaseConfig):
 	"""
-	Class to parse and modify Unreal Engine INI configuration files
-	Version 1.2.0
-	Forked from https://github.com/xwoojin/UEConfigParser
-	Licensed under MIT License
+	Configuration handler for Java-style .properties files
 	"""
-	def __init__(self):
-		"""Constructor"""
-		self.content: List[str] = []
-		self.changed = False
 
-	def is_empty(self) -> bool:
-		"""
-		Check if the content is empty
-		"""
-		return len(self.content) == 0
-
-	def is_changed(self) -> bool:
-		"""
-		Check if the content has been changed
-		"""
-		return self.changed
-
-	def is_filename(self, file_path: str):
-		"""
-		Check if the file exists
-		:param file_path: Path to the file
-		"""
-		return Path(file_path).name == file_path
-
-	def read_file(self, file_path: str):
-		"""Read and store file contents
-			Args:
-				file_path: Path to the INI file
-			Raises:
-				FileNotFoundError: If file doesn't exist
-		"""
-		if not os.path.exists(file_path):
-			raise FileNotFoundError(f'File not found: {file_path}')
-
-		with open(file_path, 'r', encoding='utf-8') as file:
-			self.content = file.readlines()
-
-		self.changed = False
-
-	def write_file(self, output_path: str, newline_option=None):
-		"""
-		Writes output to a file with the changes made
-		:param output_path: Path to the output file
-		:param newline_option: Newline character to use. Options: 'None','\n', '\r\n' (default: None)
-		"""
-		file_path = output_path
-		if self.is_filename(output_path):
-			file_path = os.path.join(os.getcwd(), output_path)
-		if not os.path.exists(os.path.dirname(file_path)):
-			try:
-				os.makedirs(os.path.dirname(file_path))
-			except Exception as e:
-				print(f'Directory create error: {file_path}', end='')
-				print(e)
-		try:
-			with open(file_path, 'w', encoding='utf-8', newline=newline_option) as file:
-				file.writelines(self.content)
-			self.changed = False
-		except Exception as e:
-			print(f'File write error: ', end='')
-			print(e)
-			raise
-
-	def is_section(self, line: str, section: str) -> bool:
-		"""
-		Checks if the line is a section
-		:param line: Line to check
-		:param section: Section name to compare
-		"""
-		if line.startswith('[') and line.endswith(']'):
-			current_section = line[1:-1].strip()
-			return current_section == section
-		return False
-
-	def add_key(self, section: str, key: str, value: str):
-		"""
-		Adds a key to a section
-		:param section: Section name to add the key
-		:param key: Key name to add
-		:param value: Value to add
-		"""
-		in_section = False
-		updated_lines = []
-		section_found = False
-		for index, line in enumerate(self.content):
-			stripped = line.strip()
-			if self.is_section(stripped, section):
-				in_section = True
-				section_found = True
-
-			if in_section and (index + 1 == len(self.content) or self.content[index + 1].strip().startswith('[')):
-				# Look-ahead to see if next line is a new section or end of file
-				updated_lines.append(f"{key}={value}\n")
-				self.changed = True
-				in_section = False
-
-			updated_lines.append(line)
-		if not section_found:
-			updated_lines.append(f'\n[{section}]\n')
-			updated_lines.append(f'{key}={value}\n')
-			self.changed = True
-		self.content = updated_lines
-
-	def add_key_after_match(self, section: str, substring: str, new_line: str):
-		"""
-		Adds a new line after the line in the specified section where the substring matches.
-
-		:param section: The section name to search in
-		:param substring: The substring to search for in lines within the section
-		:param new_line: The new line to append after the matched line
-		:raises ValueError: If the section or matching substring is not found
-		"""
-		in_section = False
-		updated_lines = []
-		section_found = False
-		found = False
-		for index, line in enumerate(self.content):
-			stripped = line.strip()
-			if self.is_section(stripped, section):
-				in_section = True
-				section_found = True
-			if in_section and substring in stripped and not found:
-				updated_lines.append(line)  # Add the current line
-				updated_lines.append(new_line + '\n')  # Add the new line after the match
-				self.changed = True
-				found = True
-			else:
-				updated_lines.append(line)
-
-			# If we exit the section
-			if in_section and self.is_section(line, section) and stripped[1:-1] != section:
-				in_section = False
-
-		if not section_found:
-			updated_lines.append(f'\n[{section}]\n')
-			updated_lines.append(f'{new_line}\n')
-			self.changed = True
-		self.content = updated_lines
-
-	def remove_key(self, section: str, key: str):
-		"""
-		Removes a key from a section
-		:param section: Section name to remove the key
-		:param key: Key name to remove
-		"""
-		in_section = False
-		exists = False
-		updated_lines = []
-		for line in self.content:
-			if not exists:
-				stripped = line.strip()
-				if self.is_section(stripped, section):
-					in_section = True
-				elif stripped.startswith('[') and stripped.endswith(']'):
-					in_section = False
-				if in_section and '=' in stripped and not stripped.startswith((';', '#')):
-					current_key, value = map(str.strip, stripped.split('=', 1))
-					if current_key == key:
-						exists = True
-						self.changed = True
-						continue
-			updated_lines.append(line)
-
-		if not exists:
-			return False
-		self.content = updated_lines
-		return True
-
-	def remove_key_by_substring_search(self, section: str, substring: str, search_in_comment=False):
-		"""
-		Removes a key from a section
-		:param section: Section name to remove the key
-		:param key: Key name to remove
-		"""
-		in_section = False
-		exists = False
-		updated_lines = []
-		for line in self.content:
-			if not exists:
-				stripped = line.strip()
-				if self.is_section(stripped, section):
-					in_section = True
-				elif stripped.startswith('[') and stripped.endswith(']'):
-					in_section = False
-				if in_section and '=' in stripped:
-					search = True
-					if stripped.startswith(';') or stripped.startswith('#'):
-						if not search_in_comment:
-							search = False
-					if search:
-						if substring in stripped:
-							exists = True
-							self.changed = True
-							continue
-			updated_lines.append(line)
-
-		if not exists:
-			return False
-		self.content = updated_lines
-		return True
-
-	def replace_value_with_same_key(self, section: str, key: str, new_value: str, spacing=False):
-		"""
-		Modifies the value of a key in a section
-		:param section: Section name to modify
-		:param key: Key name to modify
-		:param new_value: New value to set
-		:param spacing: Add space between key and the value (default: False)
-		"""
-		in_section = False
-		exists = False
-		updated_lines = []
-		for line in self.content:
-			if not exists:
-				stripped = line.strip()
-				if self.is_section(stripped, section):
-					in_section = True
-				elif stripped.startswith('[') and stripped.endswith(']'):
-					in_section = False
-				if in_section and '=' in stripped and not stripped.startswith((';', '#')):
-					current_key, value = map(str.strip, stripped.split('=', 1))
-					if current_key == key:
-						if spacing:
-							line = f'{key} = {new_value}\n'
-						else:
-							line = f'{key}={new_value}\n'
-						self.changed = True
-						exists = True
-			updated_lines.append(line)
-
-		if not exists:
-			return False
-		self.content = updated_lines
-		return True
-
-	def comment_key(self, section: str, key: str):
-		"""
-		Disables a key by commenting it out
-		:param section: Section name to modify
-		:param key: Key name to disable
-		"""
-		in_section = False
-		exists = False
-		updated_lines = []
-		for line in self.content:
-			if not exists:
-				stripped = line.strip()
-				if self.is_section(stripped, section):
-					in_section = True
-				elif stripped.startswith('[') and stripped.endswith(']'):
-					in_section = False
-				if in_section and '=' in stripped and not stripped.startswith((';', '#')):
-					current_key, value = map(str.strip, stripped.split('=', 1))
-					if current_key == key:
-						line = f';{line}'
-						self.changed = True
-						exists = True
-			updated_lines.append(line)
-		if not exists:
-			return False
-		self.content = updated_lines
-		return True
-
-	def uncomment_key(self, section: str, key: str):
-		"""
-		Enables a key by uncommenting it
-		:param section: Section name to modify
-		:param key: Key name to enable
-		"""
-		in_section = False
-		exists = False
-		updated_lines = []
-		for line in self.content:
-			if not exists:
-				stripped = line.strip()
-				if self.is_section(stripped, section):
-					in_section = True
-				elif stripped.startswith('[') and stripped.endswith(']'):
-					in_section = False
-				if in_section and stripped.startswith(';') and '=' in stripped:
-					uncommented_line = stripped[1:].strip()
-					current_key, value = map(str.strip, uncommented_line.split('=', 1))
-					if current_key == key:
-						line = uncommented_line + '\n'
-						self.changed = True
-						exists = True
-			updated_lines.append(line)
-		if not exists:
-			return False
-		self.content = updated_lines
-		return True
-
-	def set_value_by_substring_search(self, section: str, match_substring: str, new_value: str, search_in_comment=False):
-		"""
-		Updates the value of any key in the given section if the full 'key=value' string contains the match_substring. (even partial match)
-
-		:param section: The section to search in.
-		:param match_substring: The substring to match within the 'key=value' string.
-		:param new_value: The new value to set if the substring matches.
-		"""
-		in_section = False
-		updated_lines = []
-		exists = False
-
-		for line in self.content:
-			search = True
-			updated = False
-			if not exists:
-				stripped = line.strip()
-				if self.is_section(stripped, section):
-					in_section = True
-				elif stripped.startswith('[') and stripped.endswith(']'):
-					in_section = False
-				if in_section and '=' in stripped:
-					if stripped.startswith((';', '#')):
-						if not search_in_comment:
-							search = False
-					if search:
-						key, value = map(str.strip, stripped.split('=', 1))
-						if match_substring in stripped:
-							line = f'{key}={new_value}\n'
-							self.changed = True
-							exists = True
-			updated_lines.append(line)
-
-		if not exists:
-			return False
-		self.content = updated_lines
-		return True
-
-	def comment_by_substring_search(self, section: str, match_substring: str, search_in_comment=False):
-		"""
-		comment entire key if value is matched in given section  (even partial match)
-
-		:param section: The section to search in.
-		:param key: The key whose value needs to be updated.
-		:param match_substring: The substring to match in the current value.
-		"""
-		in_section = False
-		exists = False
-		updated_lines = []
-
-		for line in self.content:
-			if not exists:
-				stripped = line.strip()
-				if self.is_section(stripped, section):
-					in_section = True
-				elif stripped.startswith('[') and stripped.endswith(']'):
-					in_section = False
-				if in_section and '=' in stripped and not exists:
-					search = True
-					if stripped.startswith(';') or stripped.startswith('#'):
-						if not search_in_comment:
-							search = False
-					if search:
-						current_key, value = map(str.strip, stripped.split('=', 1))
-						if match_substring in value:
-							line = f';{line}'
-							self.changed = True
-							exists = True
-			updated_lines.append(line)
-
-		if not exists:
-			return False
-		self.content = updated_lines
-		return True
-
-	def uncomment_by_substring_search(self, section: str, match_substring: str):
-		"""
-		uncomment entire key if value is matched in given section  (even partial match)
-
-		:param section: The section to search in.
-		:param match_substring: The substring to match in the current value.
-		"""
-		in_section = False
-		exists = False
-		updated_lines = []
-
-		for line in self.content:
-			if not exists:
-				stripped = line.strip()
-				if self.is_section(stripped, section):
-					in_section = True
-				elif stripped.startswith('[') and stripped.endswith(']'):
-					in_section = False
-				if in_section and stripped.startswith(';'):
-					uncommented_line = stripped[1:].strip()
-					if match_substring in stripped:
-						line = uncommented_line + '\n'
-						self.changed = True
-						exists = True
-			updated_lines.append(line)
-
-		if not exists:
-			return False
-		self.content = updated_lines
-		return True
-
-	def replace_value_by_substring_search(self, section: str, match_substring: str, new_substring: str, search_in_comment=False):
-		"""
-		Replaces a substring in the values as it treats key=value entire line as a single string within a given section.
-
-		:param section: The section to search in.
-		:param match_substring: The substring to match in the current value.
-		:param new_substring: The new substring to replace the match.
-		"""
-		in_section = False
-		exists = False
-		updated_lines = []
-		for line in self.content:
-			search = True
-			found = False
-			stripped = line.strip()
-			if not exists:
-				if self.is_section(stripped, section):
-					in_section = True
-				elif stripped.startswith('[') and stripped.endswith(']'):
-					in_section = False
-				if in_section and '=' in stripped:
-					if stripped.startswith(';') or stripped.startswith('#'):
-						if not search_in_comment:
-							search = False
-					if search:
-						if match_substring in stripped:
-							line = stripped.replace(match_substring, new_substring) + '\n'
-							self.changed = True
-							exists = True
-							found = True
-			updated_lines.append(line)
-
-		if not exists:
-			return False
-		self.content = updated_lines
-		return True
-
-	def display(self):
-		"""
-		Prints the lines to the console
-		"""
-		for line in self.content:
-			print(line, end='')
-		print(' ')
-
-	def get_key(self, section: str, key: str, default: str = '') -> str:
-		"""
-		Get the value of a requested section/key.
-
-		:param section: Section name to modify
-		:param key: Key name to retrieve
-		:param default: Default value if key not found
-
-		:return: Value of the key or default if not found
-		"""
-		in_section = False
-		for line in self.content:
-			stripped = line.strip()
-			if self.is_section(stripped, section):
-				in_section = True
-			elif stripped.startswith('[') and stripped.endswith(']'):
-				in_section = False
-
-			if in_section and '=' in stripped:
-				uncommented_line = stripped[1:].strip() if stripped.startswith(';') else stripped
-				current_key, value = map(str.strip, uncommented_line.split('=', 1))
-				if current_key == key:
-					return value
-
-		return default
-
-	def set_key(self, section: str, key: str, value: str):
-		"""
-		Sets a key/value pair to a section, creating it if necessary
-
-		:param section: Section name to add the key
-		:param key: Key name to add
-		:param value: Value to add
-		"""
-		in_section = False
-		updated_lines = []
-		found = False
-		for line in self.content:
-			stripped = line.strip()
-			if self.is_section(stripped, section):
-				in_section = True
-			elif stripped.startswith('[') and stripped.endswith(']'):
-				in_section = False
-
-			if in_section and '=' in stripped:
-				if stripped.startswith(';'):
-					uncommented_line = stripped[1:].strip()
-					commented = True
-				else:
-					uncommented_line = stripped
-					commented = False
-				current_key, prev_value = map(str.strip, uncommented_line.split('=', 1))
-				if current_key == key:
-					# Key found; replace the line with the new value
-					line = ';' if commented else '' + f"{key}={value}\n"
-					self.changed = prev_value != value
-					found = True
-			updated_lines.append(line)
-
-		if found:
-			self.content = updated_lines
-		else:
-			self.add_key(section, key, value)
-
-
-class UnrealConfig(BaseConfig):
 	def __init__(self, group_name: str, path: str):
 		super().__init__(group_name)
 		self.path = path
-		self.parser = UnrealConfigParser()
+		self.values = {}
 
 	def get_value(self, name: str) -> Union[str, int, bool]:
 		"""
@@ -2218,13 +1721,11 @@ class UnrealConfig(BaseConfig):
 			print('Invalid option: %s, not present in %s configuration!' % (name, os.path.basename(self.path)), file=sys.stderr)
 			return ''
 
-		section = self.options[name][0]
 		key = self.options[name][1]
 		default = self.options[name][2]
-		type = self.options[name][3]
-		val = self.parser.get_key(section, key, default)
-
-		return BaseConfig.convert_to_system_type(val, type)
+		val_type = self.options[name][3]
+		val = self.values.get(key, default)
+		return BaseConfig.convert_to_system_type(val, val_type)
 
 	def set_value(self, name: str, value: Union[str, int, bool]):
 		"""
@@ -2238,11 +1739,11 @@ class UnrealConfig(BaseConfig):
 			print('Invalid option: %s, not present in %s configuration!' % (name, os.path.basename(self.path)), file=sys.stderr)
 			return
 
-		section = self.options[name][0]
 		key = self.options[name][1]
 		val_type = self.options[name][3]
 		str_value = BaseConfig.convert_from_system_type(value, val_type)
-		self.parser.set_key(section, key, str_value)
+
+		self.values[key] = str_value
 
 	def has_value(self, name: str) -> bool:
 		"""
@@ -2254,9 +1755,8 @@ class UnrealConfig(BaseConfig):
 		if name not in self.options:
 			return False
 
-		section = self.options[name][0]
 		key = self.options[name][1]
-		return self.parser.get_key(section, key, '') != ''
+		return self.values.get(key, '') != ''
 
 	def exists(self) -> bool:
 		"""
@@ -2270,34 +1770,49 @@ class UnrealConfig(BaseConfig):
 		Load the configuration file from disk
 		:return:
 		"""
-		if os.path.exists(self.path):
-			self.parser.read_file(self.path)
+		if not os.path.exists(self.path):
+			# File does not exist, nothing to load
+			return
+
+		with open(self.path, 'r') as cfgfile:
+			for line in cfgfile:
+				line = line.strip()
+				if line == '' or line.startswith('#') or line.startswith('!'):
+					# Skip empty lines and comments
+					continue
+				if '=' in line:
+					key, value = line.split('=', 1)
+					key = key.strip()
+					value = value.strip()
+					self.values[key] = value
+				else:
+					# Handle lines without '=' as keys with empty values
+					key = line.strip()
+					self.values[key] = ''
 
 	def save(self):
 		"""
 		Save the configuration file back to disk
 		:return:
 		"""
-		if self.parser.is_changed():
-			gid = None
-			uid = None
-			chown = False
+		with open(self.path, 'w') as cfgfile:
+			for key, value in self.values.items():
+				# Escape '%' characters that may be present
+				escaped_value = value.replace(':', '\\:')
+				cfgfile.write(f'{key}={escaped_value}\n')
 
-			if os.geteuid() == 0:
-				# Determine game user based on parent directories
-				check_path = os.path.dirname(self.path)
-				while check_path != '/' and check_path != '':
-					if os.path.exists(check_path):
-						stat_info = os.stat(check_path)
-						uid = stat_info.st_uid
-						gid = stat_info.st_gid
-						chown = True
-						break
-					check_path = os.path.dirname(check_path)
-
-			self.parser.write_file(self.path)
-			if chown:
-				os.chown(self.path, uid, gid)
+		# Change ownership to game user if running as root
+		if os.geteuid() == 0:
+			# Determine game user based on parent directories
+			check_path = os.path.dirname(self.path)
+			while check_path != '/' and check_path != '':
+				if os.path.exists(check_path):
+					stat_info = os.stat(check_path)
+					uid = stat_info.st_uid
+					gid = stat_info.st_gid
+					os.chown(self.path, uid, gid)
+					break
+				check_path = os.path.dirname(check_path)
 
 
 def menu_get_services(game):
@@ -2827,7 +2342,6 @@ def steamcmd_check_app_update(app_manifest: str):
 	available_build_id = details['depots']['branches'][branch]['buildid']
 	return build_id != available_build_id
 
-
 here = os.path.dirname(os.path.realpath(__file__))
 
 # Require sudo / root for starting/stopping the service
@@ -2868,15 +2382,10 @@ class GameApp(BaseApp):
 	def __init__(self):
 		super().__init__()
 
-		self.name = 'GameName'
-		self.desc = 'Longer identifier for the game server'
-		self.steam_id = '123456789'
-		self.services = ('list-of-services',)
+		self.name = 'Minecraft'
+		self.desc = 'Minecraft Java Edition'
+		self.services = ('minecraft-server',)
 		self._svcs = None
-
-		uid = os.stat(here).st_uid
-		self.save_dir = '%s/.config/Epic/Vein/Saved/SaveGames/' % pwd.getpwuid(uid).pw_dir
-		# VEIN uses the default Epic save handler which stores saves in ~/.config
 
 		self.configs = {
 			'manager': INIConfig('manager', os.path.join(here, '.settings.ini'))
@@ -2889,7 +2398,8 @@ class GameApp(BaseApp):
 
 		:return:
 		"""
-		return steamcmd_check_app_update(os.path.join(here, 'AppFiles', 'steamapps', 'appmanifest_%s.acf' % self.steam_id))
+		# @todo Implement update check for Minecraft
+		return False
 
 	def backup(self, max_backups: int = 0) -> bool:
 		"""
@@ -2940,7 +2450,7 @@ class GameApp(BaseApp):
 		return True
 
 
-class GameService(HTTPService):
+class GameService(RCONService):
 	"""
 	Service definition and handler
 	"""
@@ -2953,9 +2463,7 @@ class GameService(HTTPService):
 		self.service = service
 		self.game = game
 		self.configs = {
-			'game': UnrealConfig('game', os.path.join(here, 'AppFiles/Vein/Saved/Config/LinuxServer/Game.ini')),
-			'gus': UnrealConfig('gus', os.path.join(here, 'AppFiles/Vein/Saved/Config/LinuxServer/GameUserSettings.ini')),
-			'engine': UnrealConfig('engine', os.path.join(here, 'AppFiles/Vein/Saved/Config/LinuxServer/Engine.ini'))
+			'server': PropertiesConfig('server', os.path.join(here, 'AppFiles/server.properties'))
 		}
 		self.load()
 
@@ -3000,7 +2508,7 @@ class GameService(HTTPService):
 		:return:
 		"""
 		try:
-			ret = self._http_cmd('/players')
+			ret = self._rcon_cmd('/players')
 			return ret['players']
 		except GameAPIException:
 			return None
@@ -3040,29 +2548,7 @@ class GameService(HTTPService):
 		:return:
 		"""
 		try:
-			ret = self._http_cmd('/status')
-			return ret
-		except GameAPIException:
-			return None
-
-	def get_weather(self) -> Union[dict, None]:
-		"""
-		Get the current weather from the API, or None if the API is unavailable
-
-		Returns a dictionary with the following keys
-		'temperature' - float: Temperature in Celsius
-		'precipitation' - int: Precipitation level
-		'cloudiness' - int: Cloudiness level
-		'fog' - int: Fog level
-		'pressure' - float: Atmospheric pressure in hPa
-		'relativeHumidity' - int: Relative humidity percentage
-		'windDirection' - float: Wind direction in degrees
-		'windForce' - float: Wind force in m/s
-
-		:return:
-		"""
-		try:
-			ret = self._http_cmd('/weather')
+			ret = self._rcon_cmd('/status')
 			return ret
 		except GameAPIException:
 			return None
@@ -3072,14 +2558,14 @@ class GameService(HTTPService):
 		Get the name of this game server instance
 		:return:
 		"""
-		return self.get_option_value('ServerName')
+		return self.get_option_value('Level Name')
 
 	def get_port(self) -> Union[int, None]:
 		"""
 		Get the primary port of the service, or None if not applicable
 		:return:
 		"""
-		return self.get_option_value('GamePort')
+		return self.get_option_value('Server Port')
 
 	def get_game_pid(self) -> int:
 		"""
@@ -3087,17 +2573,8 @@ class GameService(HTTPService):
 		:return:
 		"""
 
-		# There's no quick way to get the game process PID from systemd,
-		# so use ps to find the process based on the map name
-		processes = subprocess.run([
-			'ps', 'axh', '-o', 'pid,cmd'
-		], stdout=subprocess.PIPE).stdout.decode().strip()
-		exe = os.path.join(here, 'AppFiles/Vein/Binaries/Linux/VeinServer-Linux-')
-		for line in processes.split('\n'):
-			pid, cmd = line.strip().split(' ', 1)
-			if cmd.startswith(exe):
-				return int(line.strip().split(' ')[0])
-		return 0
+		# This service does not have a helper wrapper, so it's the same as the process PID
+		return self.get_pid()
 
 	def send_message(self, message: str):
 		"""

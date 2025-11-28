@@ -10,12 +10,11 @@ from scriptlets._common.get_wan_ip import *
 # import:org_python/venv_path_include.py
 import yaml
 from scriptlets.warlock.base_app import *
-from scriptlets.warlock.http_service import *
+from scriptlets.warlock.rcon_service import *
 from scriptlets.warlock.ini_config import *
-from scriptlets.warlock.unreal_config import *
+from scriptlets.warlock.properties_config import *
 from scriptlets.warlock.default_run import *
 from scriptlets.steam.steamcmd_check_app_update import *
-
 
 here = os.path.dirname(os.path.realpath(__file__))
 
@@ -57,15 +56,10 @@ class GameApp(BaseApp):
 	def __init__(self):
 		super().__init__()
 
-		self.name = 'GameName'
-		self.desc = 'Longer identifier for the game server'
-		self.steam_id = '123456789'
-		self.services = ('list-of-services',)
+		self.name = 'Minecraft'
+		self.desc = 'Minecraft Java Edition'
+		self.services = ('minecraft-server',)
 		self._svcs = None
-
-		uid = os.stat(here).st_uid
-		self.save_dir = '%s/.config/Epic/Vein/Saved/SaveGames/' % pwd.getpwuid(uid).pw_dir
-		# VEIN uses the default Epic save handler which stores saves in ~/.config
 
 		self.configs = {
 			'manager': INIConfig('manager', os.path.join(here, '.settings.ini'))
@@ -78,7 +72,8 @@ class GameApp(BaseApp):
 
 		:return:
 		"""
-		return steamcmd_check_app_update(os.path.join(here, 'AppFiles', 'steamapps', 'appmanifest_%s.acf' % self.steam_id))
+		# @todo Implement update check for Minecraft
+		return False
 
 	def backup(self, max_backups: int = 0) -> bool:
 		"""
@@ -129,7 +124,7 @@ class GameApp(BaseApp):
 		return True
 
 
-class GameService(HTTPService):
+class GameService(RCONService):
 	"""
 	Service definition and handler
 	"""
@@ -142,9 +137,7 @@ class GameService(HTTPService):
 		self.service = service
 		self.game = game
 		self.configs = {
-			'game': UnrealConfig('game', os.path.join(here, 'AppFiles/Vein/Saved/Config/LinuxServer/Game.ini')),
-			'gus': UnrealConfig('gus', os.path.join(here, 'AppFiles/Vein/Saved/Config/LinuxServer/GameUserSettings.ini')),
-			'engine': UnrealConfig('engine', os.path.join(here, 'AppFiles/Vein/Saved/Config/LinuxServer/Engine.ini'))
+			'server': PropertiesConfig('server', os.path.join(here, 'AppFiles/server.properties'))
 		}
 		self.load()
 
@@ -189,7 +182,7 @@ class GameService(HTTPService):
 		:return:
 		"""
 		try:
-			ret = self._http_cmd('/players')
+			ret = self._rcon_cmd('/players')
 			return ret['players']
 		except GameAPIException:
 			return None
@@ -229,29 +222,7 @@ class GameService(HTTPService):
 		:return:
 		"""
 		try:
-			ret = self._http_cmd('/status')
-			return ret
-		except GameAPIException:
-			return None
-
-	def get_weather(self) -> Union[dict, None]:
-		"""
-		Get the current weather from the API, or None if the API is unavailable
-
-		Returns a dictionary with the following keys
-		'temperature' - float: Temperature in Celsius
-		'precipitation' - int: Precipitation level
-		'cloudiness' - int: Cloudiness level
-		'fog' - int: Fog level
-		'pressure' - float: Atmospheric pressure in hPa
-		'relativeHumidity' - int: Relative humidity percentage
-		'windDirection' - float: Wind direction in degrees
-		'windForce' - float: Wind force in m/s
-
-		:return:
-		"""
-		try:
-			ret = self._http_cmd('/weather')
+			ret = self._rcon_cmd('/status')
 			return ret
 		except GameAPIException:
 			return None
@@ -261,14 +232,14 @@ class GameService(HTTPService):
 		Get the name of this game server instance
 		:return:
 		"""
-		return self.get_option_value('ServerName')
+		return self.get_option_value('Level Name')
 
 	def get_port(self) -> Union[int, None]:
 		"""
 		Get the primary port of the service, or None if not applicable
 		:return:
 		"""
-		return self.get_option_value('GamePort')
+		return self.get_option_value('Server Port')
 
 	def get_game_pid(self) -> int:
 		"""
@@ -276,17 +247,8 @@ class GameService(HTTPService):
 		:return:
 		"""
 
-		# There's no quick way to get the game process PID from systemd,
-		# so use ps to find the process based on the map name
-		processes = subprocess.run([
-			'ps', 'axh', '-o', 'pid,cmd'
-		], stdout=subprocess.PIPE).stdout.decode().strip()
-		exe = os.path.join(here, 'AppFiles/Vein/Binaries/Linux/VeinServer-Linux-')
-		for line in processes.split('\n'):
-			pid, cmd = line.strip().split(' ', 1)
-			if cmd.startswith(exe):
-				return int(line.strip().split(' ')[0])
-		return 0
+		# This service does not have a helper wrapper, so it's the same as the process PID
+		return self.get_pid()
 
 	def send_message(self, message: str):
 		"""

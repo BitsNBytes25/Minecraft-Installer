@@ -27,7 +27,6 @@
 #   MODE_UNINSTALL=--uninstall - Perform an uninstallation
 #   OVERRIDE_DIR=--dir=<path> - Use a custom installation directory instead of the default (optional)
 #   SKIP_FIREWALL=--skip-firewall - Do not install or configure a system firewall
-#   USE_BRANCH=--branch=<stable|experimental> - Install a different branch from Steam (optional)
 #   NONINTERACTIVE=--non-interactive - Run the installer in non-interactive mode (useful for scripted installs)
 #
 # Changelog:
@@ -103,10 +102,19 @@ function install_application() {
 
 	[ -e "$GAME_DIR/AppFiles" ] || sudo -u $GAME_USER mkdir -p "$GAME_DIR/AppFiles"
 
+	# EULA Agreement, (because Microsoft is fun like that)
+	if ! prompt_yn -q --default-yes "By continuing you agree to the Minecraft EULA located at https://aka.ms/MinecraftEULA"; then
+		echo "You must agree to the EULA to continue, exiting." >&2
+		exit 1
+	fi
+	sudo -u $GAME_USER echo "eula=true" > "$GAME_DIR/AppFiles/eula.txt"
+
 	if ! download "$GAME_SOURCE" "$GAME_DIR/AppFiles/minecraft_server.jar"; then
 		echo "Could not install $GAME_DESC, exiting" >&2
 		exit 1
 	fi
+
+	chown $GAME_USER:$GAME_USER "$GAME_DIR/AppFiles/minecraft_server.jar"
 
 	# Install system service file to be loaded by systemd
     cat > /etc/systemd/system/${GAME_SERVICE}.service <<EOF
@@ -163,6 +171,7 @@ EOF
 	sudo -u $GAME_USER python3 -m venv "$GAME_DIR/.venv"
 	sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install --upgrade pip
 	sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install pyyaml
+	sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install rcon
 }
 
 function postinstall() {

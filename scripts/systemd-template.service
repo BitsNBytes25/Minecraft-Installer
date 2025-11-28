@@ -11,7 +11,7 @@ User=$GAME_USER
 Group=$GAME_USER
 WorkingDirectory=$GAME_DIR/AppFiles
 Environment=XDG_RUNTIME_DIR=/run/user/$(id -u $GAME_USER)
-ExecStart=/usr/bin/java -Xmx1G -Xms2G -jar minecraft_server.jar nogui
+ExecStart=/usr/bin/java -Xmx1G -Xms1G -jar minecraft_server.jar nogui
 ExecStop=$GAME_DIR/manage.py --pre-stop --service ${GAME_SERVICE}
 ExecStartPost=$GAME_DIR/manage.py --post-start --service ${GAME_SERVICE}
 Restart=on-failure
