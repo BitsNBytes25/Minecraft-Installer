@@ -9,6 +9,8 @@ from scriptlets.bz_eval_tui.print_header import *
 from scriptlets._common.get_wan_ip import *
 # import:org_python/venv_path_include.py
 import yaml
+import random
+import string
 from scriptlets.warlock.base_app import *
 from scriptlets.warlock.rcon_service import *
 from scriptlets.warlock.ini_config import *
@@ -75,53 +77,24 @@ class GameApp(BaseApp):
 		# @todo Implement update check for Minecraft
 		return False
 
-	def backup(self, max_backups: int = 0) -> bool:
+	def get_save_files(self) -> Union[list, None]:
 		"""
-		Backup the game server files
+		Get a list of save files / directories for the game server
 
-		:param max_backups: Maximum number of backups to keep (0 = unlimited)
 		:return:
 		"""
-		temp_store = self.prepare_backup()
+		files = ['banned-ips.json', 'banned-players.json', 'ops.json', 'whitelist.json', 'server.properties']
+		for service in self.get_services():
+			files.append(service.get_name())
+		return files
 
-		if not os.path.exists(self.save_dir):
-			print('Save directory %s does not exist, cannot continue!' % self.save_dir, file=sys.stderr)
-			return False
-
-		# Copy all files from the save directory
-		for f in os.listdir(self.save_dir):
-			src = os.path.join(self.save_dir, f)
-			dst = os.path.join(temp_store, 'save', f)
-			if not os.path.isdir(src):
-				shutil.copy(src, dst)
-
-		backup_path = game.complete_backup(max_backups)
-
-		print('Backup saved to %s' % backup_path)
-		return True
-
-	def restore(self, path: str) -> bool:
+	def get_save_directory(self) -> Union[str, None]:
 		"""
-		Restore the game server files
+		Get the save directory for the game server
 
-		:param path: Path to the backup archive
 		:return:
 		"""
-		temp_store = self.prepare_restore(path)
-		if temp_store is False:
-			return False
-
-		# Restore save content to self.save_dir
-		save_src = os.path.join(temp_store, 'save')
-		print('Restoring save data...')
-		shutil.copytree(
-			os.path.join(save_src),
-			os.path.join(self.save_dir),
-			dirs_exist_ok=True
-		)
-
-		self.complete_restore()
-		return True
+		return os.path.join(here, 'AppFiles')
 
 
 class GameService(RCONService):
@@ -151,81 +124,65 @@ class GameService(RCONService):
 		"""
 
 		# Special option actions
-		if option == 'GamePort':
+		if option == 'Server Port':
+			# Update firewall for game port change
+			if previous_value:
+				firewall_remove(int(previous_value), 'tcp')
+			firewall_allow(int(new_value), 'tcp', 'Allow %s game port' % self.game.desc)
+		elif option == 'Query Port':
 			# Update firewall for game port change
 			if previous_value:
 				firewall_remove(int(previous_value), 'udp')
-			firewall_allow(int(new_value), 'udp', 'Allow %s game port' % self.game.desc)
-		elif option == 'SteamQueryPort':
-			# Update firewall for game port change
-			if previous_value:
-				firewall_remove(int(previous_value), 'udp')
-			firewall_allow(int(new_value), 'udp', 'Allow %s Steam query port' % self.game.desc)
+			firewall_allow(int(new_value), 'udp', 'Allow %s query port' % self.game.desc)
 
 	def is_api_enabled(self) -> bool:
 		"""
 		Check if API is enabled for this service
 		:return:
 		"""
-		return self.get_option_value('APIPort') != ''
+		return (
+			self.get_option_value('Enable RCON') and
+			self.get_option_value('RCON Port') != '' and
+			self.get_option_value('RCON Password') != ''
+		)
 
 	def get_api_port(self) -> int:
 		"""
 		Get the API port from the service configuration
 		:return:
 		"""
-		return self.get_option_value('APIPort')
+		return self.get_option_value('RCON Port')
 
-	def get_players(self) -> Union[list, None]:
+	def get_api_password(self) -> str:
 		"""
-		Get the current players on the server, or None if the API is unavailable
+		Get the API password from the service configuration
 		:return:
 		"""
-		try:
-			ret = self._rcon_cmd('/players')
-			return ret['players']
-		except GameAPIException:
-			return None
+		return self.get_option_value('RCON Password')
 
 	def get_player_count(self) -> Union[int, None]:
 		"""
 		Get the current player count on the server, or None if the API is unavailable
 		:return:
 		"""
-		status = self.get_status()
-		if status is None:
+		try:
+			ret = self._api_cmd('/list')
+			# ret should contain 'There are N of a max...' where N is the player count.
+			if ret is None:
+				return None
+			elif 'There are ' in ret:
+				return int(ret[10:ret.index(' of a max')].strip())
+			else:
+				return None
+		except GameAPIException:
 			return None
-		else:
-			return len(status['onlinePlayers'])
 
 	def get_player_max(self) -> int:
 		"""
 		Get the maximum player count allowed on the server
 		:return:
 		"""
-		return self.get_option_value('MaxPlayers')
-
-	def get_status(self) -> Union[dict, None]:
-		"""
-		Get the current server status from the API, or None if the API is unavailable
-
-		Returns a dictionary with the following keys
-		'uptime' - float: Uptime in seconds
-		'onlinePlayers' - dict: Dictionary of online players
-
-		Each player will be tagged with its PlayerID as the key, and a dictionary with the following keys:
-		'name' - str: Player name
-		'timeConnected' - float: Time connected in seconds
-		'characterId' - str: Unique character ID
-		'status' - str: Player status/role
-
-		:return:
-		"""
-		try:
-			ret = self._rcon_cmd('/status')
-			return ret
-		except GameAPIException:
-			return None
+		return self.get_option_value('Max Players')
 
 	def get_name(self) -> str:
 		"""
@@ -256,13 +213,7 @@ class GameService(RCONService):
 		:param message:
 		:return:
 		"""
-
-		pass
-		# @todo Vein just implemented this but is yet to publish documentation on how to use it.
-		#try:
-		#	self._api_cmd('/notification', method='POST', data={'message': message})
-		#except GameAPIException as e:
-		#	print('Failed to send message via API: %s' % str(e))
+		self._api_cmd('/say %s' % message)
 
 	def post_start(self) -> bool:
 		"""
@@ -304,8 +255,6 @@ class GameService(RCONService):
 			msg = msg.replace('{instance}', self.get_name())
 		self.game.send_discord_message(msg)
 
-		# Disabling until VEIN publishes their documentation on notifications
-		'''
 		if self.is_api_enabled():
 			timers = (
 				(self.game.get_option_value('Shutdown Warning 5 Minutes'), 60),
@@ -325,8 +274,10 @@ class GameService(RCONService):
 						time.sleep(timer[1])
 				else:
 					break
-			self.save_world()
-		'''
+
+			print('Forcing server save')
+			self._api_cmd('save-all flush')
+			time.sleep(5)
 		return True
 
 
@@ -345,14 +296,15 @@ def menu_first_run(game: GameApp):
 
 	svc = game.get_services()[0]
 
-	if not svc.option_has_value('ServerName'):
-		svc.set_option_value('ServerName', 'My VEIN Server')
-	if not svc.option_has_value('GamePort'):
-		svc.set_option_value('GamePort', '7777')
-	if not svc.option_has_value('SteamQueryPort'):
-		svc.set_option_value('SteamQueryPort', '27015')
-	if not svc.option_has_value('APIPort'):
-		svc.set_option_value('APIPort', '8080')
+	svc.option_ensure_set('Level Name')
+	svc.option_ensure_set('Server Port')
+	svc.option_ensure_set('RCON Port')
+	if not svc.option_has_value('RCON Password'):
+		# Generate a random password for RCON
+		random_password = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
+		svc.set_option('RCON Password', random_password)
+	if not svc.option_has_value('Enable RCON'):
+		svc.set_option('Enable RCON', True)
 
 if __name__ == '__main__':
 	game = GameApp()

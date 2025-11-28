@@ -246,7 +246,7 @@ server:
     default: false
     help: "Whether to prevent connections from known proxy servers."
   - name: Query Port
-    key: query-port
+    key: query.port
     type: int
     default: 25565
     help: "The port number for the query protocol."
@@ -256,18 +256,18 @@ server:
     default: 0
     help: "The maximum number of packets per second a player can send. 0 disables rate limiting."
   - name: RCON Password
-    key: rcon-password
+    key: rcon.password
     type: str
     default: ""
     help: "The password for RCON access."
   - name: RCON Port
-    key: rcon-port
+    key: rcon.port
     type: int
     default: 25575
     help: "The port number for RCON access."
   - name: Region File Compression
     key: region-file-compression
-    type: int
+    type: str
     default: deflate
     options:
       - none

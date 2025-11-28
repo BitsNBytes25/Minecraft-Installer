@@ -22,6 +22,8 @@ sys.path.insert(
 	)
 )
 import yaml
+import random
+import string
 import datetime
 import json
 import shutil
@@ -514,6 +516,19 @@ class BaseApp:
 
 		print('Invalid option: %s, not present in game configuration!' % option, file=sys.stderr)
 
+	def get_option_options(self, option: str):
+		"""
+		Get the list of possible options for a configuration option
+		:param options:
+		:return:
+		"""
+		for config in self.configs.values():
+			if option in config.options:
+				return config.get_options(option)
+
+		print('Invalid option: %s, not present in service configuration!' % option, file=sys.stderr)
+		return []
+
 	def prompt_option(self, option: str):
 		"""
 		Prompt the user to set a configuration option for the game
@@ -593,6 +608,22 @@ class BaseApp:
 		except urllib_error.HTTPError as e:
 			print('Could not notify Discord: %s' % e)
 
+	def get_save_directory(self) -> Union[str, None]:
+		"""
+		Get the save directory for this game, or None if not applicable
+
+		:return:
+		"""
+		return None
+
+	def get_save_files(self) -> Union[list, None]:
+		"""
+		Get the list of save files/directories for this game, or None if not applicable
+
+		:return:
+		"""
+		return None
+
 	def backup(self, max_backups: int = 0) -> bool:
 		"""
 		Perform a backup of the game configuration and save files
@@ -600,7 +631,10 @@ class BaseApp:
 		:param max_backups: Maximum number of backups to keep (0 = unlimited)
 		:return:
 		"""
-		pass
+		self.prepare_backup()
+		backup_path = self.complete_backup(max_backups)
+		print('Backup saved to %s' % backup_path)
+		return True
 
 	def prepare_backup(self) -> str:
 		"""
@@ -610,6 +644,8 @@ class BaseApp:
 		"""
 		here = os.path.dirname(os.path.realpath(__file__))
 		temp_store = os.path.join(here, '.save')
+		save_source = self.get_save_directory()
+		save_files = self.get_save_files()
 
 		# Temporary directories for various file sources
 		for d in ['config', 'save']:
@@ -624,6 +660,18 @@ class BaseApp:
 				print('Backing up configuration file: %s' % src)
 				dst = os.path.join(temp_store, 'config', os.path.basename(src))
 				shutil.copy(src, dst)
+
+		# Copy save files if specified
+		if save_source and save_files:
+			for f in save_files:
+				src = os.path.join(save_source, f)
+				dst = os.path.join(temp_store, 'save', f)
+				if os.path.exists(src):
+					print('Backing up save file: %s' % src)
+					if os.path.isfile(src):
+						shutil.copy(src, dst)
+					else:
+						shutil.copytree(src, dst)
 
 		return temp_store
 
@@ -701,7 +749,11 @@ class BaseApp:
 		:param path:
 		:return:
 		"""
-		pass
+		temp_store = self.prepare_restore(path)
+		if temp_store is False:
+			return False
+		self.complete_restore()
+		return True
 
 	def prepare_restore(self, filename) -> Union[str, bool]:
 		"""
@@ -721,6 +773,7 @@ class BaseApp:
 		here = os.path.dirname(os.path.realpath(__file__))
 		temp_store = os.path.join(here, '.restore')
 		os.makedirs(temp_store, exist_ok=True)
+		save_dest = self.get_save_directory()
 
 		if os.geteuid() == 0:
 			stat_info = os.stat(here)
@@ -745,6 +798,28 @@ class BaseApp:
 					if uid is not None:
 						os.chown(dst, uid, gid)
 
+		# If the save destination is specified, perform those files/directories too.
+		if save_dest:
+			save_src = os.path.join(temp_store, 'save')
+			if os.path.exists(save_src):
+				for item in os.listdir(save_src):
+					src = os.path.join(save_src, item)
+					dst = os.path.join(save_dest, item)
+					print('Restoring save file: %s' % dst)
+					if os.path.isfile(src):
+						shutil.copy(src, dst)
+					else:
+						shutil.copytree(src, dst, dirs_exist_ok=True)
+					if uid is not None:
+						if os.path.isfile(dst):
+							os.chown(dst, uid, gid)
+						else:
+							for root, dirs, files in os.walk(dst):
+								for momo in dirs:
+									os.chown(os.path.join(root, momo), uid, gid)
+								for momo in files:
+									os.chown(os.path.join(root, momo), uid, gid)
+
 		return temp_store
 
 	def complete_restore(self):
@@ -758,6 +833,7 @@ class BaseApp:
 
 		# Cleanup
 		shutil.rmtree(temp_store)
+# from scriptlets.warlock.base_service import *
 
 
 class BaseService:
@@ -894,6 +970,29 @@ class BaseService:
 
 		print('Invalid option: %s, not present in service configuration!' % option, file=sys.stderr)
 		return False
+
+	def get_option_options(self, option: str):
+		"""
+		Get the list of possible options for a configuration option
+		:param options:
+		:return:
+		"""
+		for config in self.configs.values():
+			if option in config.options:
+				return config.get_options(option)
+
+		print('Invalid option: %s, not present in service configuration!' % option, file=sys.stderr)
+		return []
+
+	def option_ensure_set(self, option: str):
+		"""
+		Ensure that a configuration option has a value set, using the default if not
+		:param option:
+		:return:
+		"""
+		if not self.option_has_value(option):
+			default = self.get_option_default(option)
+			self.set_option(option, default)
 
 	def get_name(self) -> str:
 		"""
@@ -1355,10 +1454,7 @@ class BaseService:
 
 
 class RCONService(BaseService):
-	#def __init__(self, service: str, game: BaseGameApp):
-	#	super().__init__(service, game)
-
-	def _rcon_cmd(self, cmd) -> Union[None,str]:
+	def _api_cmd(self, cmd) -> Union[None,str]:
 		"""
 		Execute a raw command with RCON and return the result
 
@@ -1373,10 +1469,22 @@ class RCONService(BaseService):
 			# RCON is not available due to settings
 			return None
 
+		# Safety checks to ensure we have the necessary info, (regardless of is_api_enabled)
+		port = self.get_api_port()
+		if port is None:
+			print("RCON port is not set!  Please populate get_api_port definition.", file=sys.stderr)
+			return None
+
+		password = self.get_api_password()
+		if password is None:
+			print("RCON password is not set!  Please populate get_api_password definition.", file=sys.stderr)
+			return None
+
 		try:
-			with Client('127.0.0.1', self.get_api_port(), passwd=self.get_api_password(), timeout=2) as client:
+			with Client('127.0.0.1', port, passwd=password, timeout=2) as client:
 				return client.run(cmd).strip()
-		except:
+		except Exception as e:
+			print(str(e), file=sys.stderr)
 			return None
 
 	def is_api_enabled(self) -> bool:
@@ -1436,10 +1544,11 @@ class BaseConfig:
 								option.get('key'),
 								option.get('default'),
 								option.get('type', 'str'),
-								option.get('help', '')
+								option.get('help', ''),
+								option.get('options', None)
 							)
 
-	def add_option(self, name, section, key, default, val_type, help_text):
+	def add_option(self, name, section, key, default, val_type, help_text, options=None):
 		"""
 		Add a configuration option to the available list
 
@@ -1462,7 +1571,7 @@ class BaseConfig:
 		if default is None:
 			default = ''
 
-		self.options[name] = (section, key, default, val_type, help_text)
+		self.options[name] = (section, key, default, val_type, help_text, options)
 		# Primary dictionary of all options on this config
 
 		self._keys[key.lower()] = name
@@ -1573,6 +1682,19 @@ class BaseConfig:
 			return ''
 
 		return self.options[name][4]
+
+	def get_options(self, name: str):
+		"""
+		Get the list of valid options for a configuration option from the config
+
+		:param name:
+		:return:
+		"""
+		if name not in self.options:
+			print('Invalid option: %s, not available in configuration!' % (name, ), file=sys.stderr)
+			return None
+
+		return self.options[name][5]
 
 	def exists(self) -> bool:
 		"""
@@ -1784,6 +1906,8 @@ class PropertiesConfig(BaseConfig):
 					key, value = line.split('=', 1)
 					key = key.strip()
 					value = value.strip()
+					# Un-escape characters
+					value = value.replace('\\:', ':')
 					self.values[key] = value
 				else:
 					# Handle lines without '=' as keys with empty values
@@ -2019,7 +2143,8 @@ def run_manager(game):
 				'default': source.get_option_default(opt),
 				'value': source.get_option_value(opt),
 				'type': source.get_option_type(opt),
-				'help': source.get_option_help(opt)
+				'help': source.get_option_help(opt),
+				'options': source.get_option_options(opt),
 			})
 		print(json.dumps(opts))
 		sys.exit(0)
@@ -2401,53 +2526,24 @@ class GameApp(BaseApp):
 		# @todo Implement update check for Minecraft
 		return False
 
-	def backup(self, max_backups: int = 0) -> bool:
+	def get_save_files(self) -> Union[list, None]:
 		"""
-		Backup the game server files
+		Get a list of save files / directories for the game server
 
-		:param max_backups: Maximum number of backups to keep (0 = unlimited)
 		:return:
 		"""
-		temp_store = self.prepare_backup()
+		files = ['banned-ips.json', 'banned-players.json', 'ops.json', 'whitelist.json', 'server.properties']
+		for service in self.get_services():
+			files.append(service.get_name())
+		return files
 
-		if not os.path.exists(self.save_dir):
-			print('Save directory %s does not exist, cannot continue!' % self.save_dir, file=sys.stderr)
-			return False
-
-		# Copy all files from the save directory
-		for f in os.listdir(self.save_dir):
-			src = os.path.join(self.save_dir, f)
-			dst = os.path.join(temp_store, 'save', f)
-			if not os.path.isdir(src):
-				shutil.copy(src, dst)
-
-		backup_path = game.complete_backup(max_backups)
-
-		print('Backup saved to %s' % backup_path)
-		return True
-
-	def restore(self, path: str) -> bool:
+	def get_save_directory(self) -> Union[str, None]:
 		"""
-		Restore the game server files
+		Get the save directory for the game server
 
-		:param path: Path to the backup archive
 		:return:
 		"""
-		temp_store = self.prepare_restore(path)
-		if temp_store is False:
-			return False
-
-		# Restore save content to self.save_dir
-		save_src = os.path.join(temp_store, 'save')
-		print('Restoring save data...')
-		shutil.copytree(
-			os.path.join(save_src),
-			os.path.join(self.save_dir),
-			dirs_exist_ok=True
-		)
-
-		self.complete_restore()
-		return True
+		return os.path.join(here, 'AppFiles')
 
 
 class GameService(RCONService):
@@ -2477,81 +2573,65 @@ class GameService(RCONService):
 		"""
 
 		# Special option actions
-		if option == 'GamePort':
+		if option == 'Server Port':
+			# Update firewall for game port change
+			if previous_value:
+				firewall_remove(int(previous_value), 'tcp')
+			firewall_allow(int(new_value), 'tcp', 'Allow %s game port' % self.game.desc)
+		elif option == 'Query Port':
 			# Update firewall for game port change
 			if previous_value:
 				firewall_remove(int(previous_value), 'udp')
-			firewall_allow(int(new_value), 'udp', 'Allow %s game port' % self.game.desc)
-		elif option == 'SteamQueryPort':
-			# Update firewall for game port change
-			if previous_value:
-				firewall_remove(int(previous_value), 'udp')
-			firewall_allow(int(new_value), 'udp', 'Allow %s Steam query port' % self.game.desc)
+			firewall_allow(int(new_value), 'udp', 'Allow %s query port' % self.game.desc)
 
 	def is_api_enabled(self) -> bool:
 		"""
 		Check if API is enabled for this service
 		:return:
 		"""
-		return self.get_option_value('APIPort') != ''
+		return (
+			self.get_option_value('Enable RCON') and
+			self.get_option_value('RCON Port') != '' and
+			self.get_option_value('RCON Password') != ''
+		)
 
 	def get_api_port(self) -> int:
 		"""
 		Get the API port from the service configuration
 		:return:
 		"""
-		return self.get_option_value('APIPort')
+		return self.get_option_value('RCON Port')
 
-	def get_players(self) -> Union[list, None]:
+	def get_api_password(self) -> str:
 		"""
-		Get the current players on the server, or None if the API is unavailable
+		Get the API password from the service configuration
 		:return:
 		"""
-		try:
-			ret = self._rcon_cmd('/players')
-			return ret['players']
-		except GameAPIException:
-			return None
+		return self.get_option_value('RCON Password')
 
 	def get_player_count(self) -> Union[int, None]:
 		"""
 		Get the current player count on the server, or None if the API is unavailable
 		:return:
 		"""
-		status = self.get_status()
-		if status is None:
+		try:
+			ret = self._api_cmd('/list')
+			# ret should contain 'There are N of a max...' where N is the player count.
+			if ret is None:
+				return None
+			elif 'There are ' in ret:
+				return int(ret[10:ret.index(' of a max')].strip())
+			else:
+				return None
+		except GameAPIException:
 			return None
-		else:
-			return len(status['onlinePlayers'])
 
 	def get_player_max(self) -> int:
 		"""
 		Get the maximum player count allowed on the server
 		:return:
 		"""
-		return self.get_option_value('MaxPlayers')
-
-	def get_status(self) -> Union[dict, None]:
-		"""
-		Get the current server status from the API, or None if the API is unavailable
-
-		Returns a dictionary with the following keys
-		'uptime' - float: Uptime in seconds
-		'onlinePlayers' - dict: Dictionary of online players
-
-		Each player will be tagged with its PlayerID as the key, and a dictionary with the following keys:
-		'name' - str: Player name
-		'timeConnected' - float: Time connected in seconds
-		'characterId' - str: Unique character ID
-		'status' - str: Player status/role
-
-		:return:
-		"""
-		try:
-			ret = self._rcon_cmd('/status')
-			return ret
-		except GameAPIException:
-			return None
+		return self.get_option_value('Max Players')
 
 	def get_name(self) -> str:
 		"""
@@ -2582,13 +2662,7 @@ class GameService(RCONService):
 		:param message:
 		:return:
 		"""
-
-		pass
-		# @todo Vein just implemented this but is yet to publish documentation on how to use it.
-		#try:
-		#	self._api_cmd('/notification', method='POST', data={'message': message})
-		#except GameAPIException as e:
-		#	print('Failed to send message via API: %s' % str(e))
+		self._api_cmd('/say %s' % message)
 
 	def post_start(self) -> bool:
 		"""
@@ -2630,8 +2704,6 @@ class GameService(RCONService):
 			msg = msg.replace('{instance}', self.get_name())
 		self.game.send_discord_message(msg)
 
-		# Disabling until VEIN publishes their documentation on notifications
-		'''
 		if self.is_api_enabled():
 			timers = (
 				(self.game.get_option_value('Shutdown Warning 5 Minutes'), 60),
@@ -2651,8 +2723,10 @@ class GameService(RCONService):
 						time.sleep(timer[1])
 				else:
 					break
-			self.save_world()
-		'''
+
+			print('Forcing server save')
+			self._api_cmd('save-all flush')
+			time.sleep(5)
 		return True
 
 
@@ -2671,14 +2745,15 @@ def menu_first_run(game: GameApp):
 
 	svc = game.get_services()[0]
 
-	if not svc.option_has_value('ServerName'):
-		svc.set_option_value('ServerName', 'My VEIN Server')
-	if not svc.option_has_value('GamePort'):
-		svc.set_option_value('GamePort', '7777')
-	if not svc.option_has_value('SteamQueryPort'):
-		svc.set_option_value('SteamQueryPort', '27015')
-	if not svc.option_has_value('APIPort'):
-		svc.set_option_value('APIPort', '8080')
+	svc.option_ensure_set('Level Name')
+	svc.option_ensure_set('Server Port')
+	svc.option_ensure_set('RCON Port')
+	if not svc.option_has_value('RCON Password'):
+		# Generate a random password for RCON
+		random_password = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
+		svc.set_option('RCON Password', random_password)
+	if not svc.option_has_value('Enable RCON'):
+		svc.set_option('Enable RCON', True)
 
 if __name__ == '__main__':
 	game = GameApp()
