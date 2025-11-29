@@ -52,12 +52,10 @@ GAME_SOURCE="https://piston-data.mojang.com/v1/objects/95495a7f485eedd84ce928cef
 # scriptlet:_common/require_root.sh
 # scriptlet:_common/get_firewall.sh
 # scriptlet:_common/package_install.sh
-# scriptlet:_common/firewall_allow.sh
 # scriptlet:_common/download.sh
 # scriptlet:bz_eval_tui/prompt_text.sh
 # scriptlet:bz_eval_tui/prompt_yn.sh
 # scriptlet:bz_eval_tui/print_header.sh
-# scriptlet:steam/install-steamcmd.sh
 # scriptlet:ufw/install.sh
 
 print_header "$GAME_DESC *unofficial* Installer ${INSTALLER_VERSION}"

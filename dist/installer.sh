@@ -275,146 +275,6 @@ function package_install (){
 	fi
 }
 ##
-# Add an "allow" rule to the firewall in the INPUT chain
-#
-# Arguments:
-#   --port <port>       Port(s) to allow
-#   --source <source>   Source IP to allow (default: any)
-#   --zone <zone>       Zone to allow (default: public)
-#   --tcp|--udp         Protocol to allow (default: tcp)
-#   --proto <tcp|udp>   Protocol to allow (alternative method)
-#   --comment <comment> (only UFW) Comment for the rule
-#
-# Specify multiple ports with `--port '#,#,#'` or a range `--port '#:#'`
-#
-# CHANGELOG:
-#   2025.11.23 - Use return codes instead of exit to allow the caller to handle errors
-#   2025.04.10 - Add "--proto" argument as alternative to "--tcp|--udp"
-#
-function firewall_allow() {
-	# Defaults and argument processing
-	local PORT=""
-	local PROTO="tcp"
-	local SOURCE="any"
-	local FIREWALL=$(get_available_firewall)
-	local ZONE="public"
-	local COMMENT=""
-	while [ $# -ge 1 ]; do
-		case $1 in
-			--port)
-				shift
-				PORT=$1
-				;;
-			--tcp|--udp)
-				PROTO=${1:2}
-				;;
-			--proto)
-				shift
-				PROTO=$1
-				;;
-			--source|--from)
-				shift
-				SOURCE=$1
-				;;
-			--zone)
-				shift
-				ZONE=$1
-				;;
-			--comment)
-				shift
-				COMMENT=$1
-				;;
-			*)
-				PORT=$1
-				;;
-		esac
-		shift
-	done
-
-	if [ "$PORT" == "" -a "$ZONE" != "trusted" ]; then
-		echo "firewall_allow: No port specified!" >&2
-		return 2
-	fi
-
-	if [ "$PORT" != "" -a "$ZONE" == "trusted" ]; then
-		echo "firewall_allow: Trusted zones do not use ports!" >&2
-		return 2
-	fi
-
-	if [ "$ZONE" == "trusted" -a "$SOURCE" == "any" ]; then
-		echo "firewall_allow: Trusted zones require a source!" >&2
-		return 2
-	fi
-
-	if [ "$FIREWALL" == "ufw" ]; then
-		if [ "$SOURCE" == "any" ]; then
-			echo "firewall_allow/UFW: Allowing $PORT/$PROTO from any..."
-			ufw allow proto $PROTO to any port $PORT comment "$COMMENT"
-		elif [ "$ZONE" == "trusted" ]; then
-			echo "firewall_allow/UFW: Allowing all connections from $SOURCE..."
-			ufw allow from $SOURCE comment "$COMMENT"
-		else
-			echo "firewall_allow/UFW: Allowing $PORT/$PROTO from $SOURCE..."
-			ufw allow from $SOURCE proto $PROTO to any port $PORT comment "$COMMENT"
-		fi
-		return 0
-	elif [ "$FIREWALL" == "firewalld" ]; then
-		if [ "$SOURCE" != "any" ]; then
-			# Firewalld uses Zones to specify sources
-			echo "firewall_allow/firewalld: Adding $SOURCE to $ZONE zone..."
-			firewall-cmd --zone=$ZONE --add-source=$SOURCE --permanent
-		fi
-
-		if [ "$PORT" != "" ]; then
-			echo "firewall_allow/firewalld: Allowing $PORT/$PROTO in $ZONE zone..."
-			if [[ "$PORT" =~ ":" ]]; then
-				# firewalld expects port ranges to be in the format of "#-#" vs "#:#"
-				local DPORTS="${PORT/:/-}"
-				firewall-cmd --zone=$ZONE --add-port=$DPORTS/$PROTO --permanent
-			elif [[ "$PORT" =~ "," ]]; then
-				# Firewalld cannot handle multiple ports all that well, so split them by the comma
-				# and run the add command separately for each port
-				local DPORTS="$(echo $PORT | sed 's:,: :g')"
-				for P in $DPORTS; do
-					firewall-cmd --zone=$ZONE --add-port=$P/$PROTO --permanent
-				done
-			else
-				firewall-cmd --zone=$ZONE --add-port=$PORT/$PROTO --permanent
-			fi
-		fi
-
-		firewall-cmd --reload
-		return 0
-	elif [ "$FIREWALL" == "iptables" ]; then
-		echo "firewall_allow/iptables: WARNING - iptables is untested"
-		# iptables doesn't natively support multiple ports, so we have to get creative
-		if [[ "$PORT" =~ ":" ]]; then
-			local DPORTS="-m multiport --dports $PORT"
-		elif [[ "$PORT" =~ "," ]]; then
-			local DPORTS="-m multiport --dports $PORT"
-		else
-			local DPORTS="--dport $PORT"
-		fi
-
-		if [ "$SOURCE" == "any" ]; then
-			echo "firewall_allow/iptables: Allowing $PORT/$PROTO from any..."
-			iptables -A INPUT -p $PROTO $DPORTS -j ACCEPT
-		else
-			echo "firewall_allow/iptables: Allowing $PORT/$PROTO from $SOURCE..."
-			iptables -A INPUT -p $PROTO $DPORTS -s $SOURCE -j ACCEPT
-		fi
-		iptables-save > /etc/iptables/rules.v4
-		return 0
-	elif [ "$FIREWALL" == "none" ]; then
-		echo "firewall_allow: No firewall detected" >&2
-		return 1
-	else
-		echo "firewall_allow: Unsupported or unknown firewall" >&2
-		echo 'Please report this at https://github.com/cdp1337/ScriptsCollection/issues' >&2
-		return 1
-	fi
-}
-##
 # Simple download utility function
 #
 # Uses either cURL or wget based on which is available
@@ -622,117 +482,6 @@ function print_header() {
 	printf "%*s\n" $(((${#header}+80)/2)) "$header"
     echo ""
 }
-##
-# Get the operating system version
-#
-# Just the major version number is returned
-#
-function os_version() {
-	if [ "$(uname -s)" == 'FreeBSD' ]; then
-		local _V="$(uname -K)"
-		if [ ${#_V} -eq 6 ]; then
-			echo "${_V:0:1}"
-		elif [ ${#_V} -eq 7 ]; then
-			echo "${_V:0:2}"
-		fi
-
-	elif [ -f '/etc/os-release' ]; then
-		local VERS="$(egrep '^VERSION_ID=' /etc/os-release | sed 's:VERSION_ID=::')"
-
-		if [[ "$VERS" =~ '"' ]]; then
-			# Strip quotes around the OS name
-			VERS="$(echo "$VERS" | sed 's:"::g')"
-		fi
-
-		if [[ "$VERS" =~ \. ]]; then
-			# Remove the decimal point and everything after
-			# Trims "24.04" down to "24"
-			VERS="${VERS/\.*/}"
-		fi
-
-		if [[ "$VERS" =~ "v" ]]; then
-			# Remove the "v" from the version
-			# Trims "v24" down to "24"
-			VERS="${VERS/v/}"
-		fi
-
-		echo "$VERS"
-
-	else
-		echo 0
-	fi
-}
-
-##
-# Install SteamCMD
-function install_steamcmd() {
-	echo "Installing SteamCMD..."
-
-	TYPE_DEBIAN="$(os_like_debian)"
-	TYPE_UBUNTU="$(os_like_ubuntu)"
-	OS_VERSION="$(os_version)"
-
-	# Preliminary requirements
-	if [ "$TYPE_UBUNTU" == 1 ]; then
-		add-apt-repository -y multiverse
-		dpkg --add-architecture i386
-		apt update
-
-		# By using this script, you agree to the Steam license agreement at https://store.steampowered.com/subscriber_agreement/
-		# and the Steam privacy policy at https://store.steampowered.com/privacy_agreement/
-		# Since this is meant to support unattended installs, we will forward your acceptance of their license.
-		echo steam steam/question select "I AGREE" | debconf-set-selections
-		echo steam steam/license note '' | debconf-set-selections
-
-		apt install -y steamcmd
-	elif [ "$TYPE_DEBIAN" == 1 ]; then
-		dpkg --add-architecture i386
-		apt update
-
-		if [ "$OS_VERSION" -le 12 ]; then
-			apt install -y software-properties-common apt-transport-https dirmngr ca-certificates lib32gcc-s1
-
-			# Enable "non-free" repos for Debian (for steamcmd)
-			# https://stackoverflow.com/questions/76688863/apt-add-repository-doesnt-work-on-debian-12
-			add-apt-repository -y -U http://deb.debian.org/debian -c non-free-firmware -c non-free
-			if [ $? -ne 0 ]; then
-				echo "Workaround failed to add non-free repos, trying new method instead"
-				apt-add-repository -y non-free
-			fi
-		else
-			# Debian Trixie and later
-			if [ -e /etc/apt/sources.list ]; then
-				if ! grep -q ' non-free ' /etc/apt/sources.list; then
-					sed -i 's/main/main non-free-firmware non-free contrib/g' /etc/apt/sources.list
-				fi
-			elif [ -e /etc/apt/sources.list.d/debian.sources ]; then
-				if ! grep -q ' non-free ' /etc/apt/sources.list.d/debian.sources; then
-					sed -i 's/main/main non-free-firmware non-free contrib/g' /etc/apt/sources.list.d/debian.sources
-				fi
-			else
-				echo "Could not find a sources.list file to enable non-free repos" >&2
-				exit 1
-			fi
-		fi
-
-		# Install steam repo
-		download http://repo.steampowered.com/steam/archive/stable/steam.gpg /usr/share/keyrings/steam.gpg
-		echo "deb [arch=amd64,i386 signed-by=/usr/share/keyrings/steam.gpg] http://repo.steampowered.com/steam/ stable steam" > /etc/apt/sources.list.d/steam.list
-
-		# By using this script, you agree to the Steam license agreement at https://store.steampowered.com/subscriber_agreement/
-		# and the Steam privacy policy at https://store.steampowered.com/privacy_agreement/
-		# Since this is meant to support unattended installs, we will forward your acceptance of their license.
-		echo steam steam/question select "I AGREE" | debconf-set-selections
-		echo steam steam/license note '' | debconf-set-selections
-
-		# Install steam binary and steamcmd
-		apt update
-		apt install -y steamcmd
-	else
-		echo 'Unsupported or unknown OS' >&2
-		exit 1
-	fi
-}
 
 ##
 # Install UFW
@@ -777,15 +526,14 @@ print_header "$GAME_DESC *unofficial* Installer ${INSTALLER_VERSION}"
 function install_application() {
 	print_header "Performing install_application"
 
-	# Create a "steam" user account
+	# Create the game user account
 	# This will create the account with no password, so if you need to log in with this user,
-	# run `sudo passwd steam` to set a password.
+	# run `sudo passwd $GAME_USER` to set a password.
 	if [ -z "$(getent passwd $GAME_USER)" ]; then
 		useradd -m -U $GAME_USER
 	fi
 
 	# Preliminary requirements
-	# VEIN needs ALSA and PulseAudio libraries to run
 	package_install curl sudo default-jdk python3-venv
 
 	java -version
@@ -838,10 +586,6 @@ TimeoutStartSec=600s
 WantedBy=multi-user.target
 EOF
     systemctl daemon-reload
-    # systemctl enable $GAME_SERVICE
-
-    # Ensure necessary directories exist
-    #[ -d "$SAVE_DIR" ] || sudo -u $GAME_USER mkdir -p "$SAVE_DIR"
 
 	if [ -n "$WARLOCK_GUID" ]; then
 		# Register Warlock
@@ -1420,15 +1164,6 @@ if [ "$MODE" == "install" ]; then
 
 	# Print some instructions and useful tips
     print_header "$GAME_DESC Installation Complete"
-    echo 'Game server will auto-update on restarts and will auto-start on server boot.'
-    echo ''
-    echo "Game files:     $GAME_DIR/AppFiles/"
-    echo "Game settings:  $GAME_DIR/Game.ini"
-    echo "GUS settings:   $GAME_DIR/GameUserSettings.ini"
-    echo "Log:            $GAME_DIR/Vein.log"
-    echo ''
-    echo "Next steps: configure your server by running"
-    echo "sudo $GAME_DIR/manage.py"
 fi
 
 if [ "$MODE" == "uninstall" ]; then

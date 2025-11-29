@@ -33,7 +33,6 @@ from rcon.exceptions import WrongPassword
 import time
 import configparser
 import argparse
-import re
 
 def get_enabled_firewall() -> str:
 	"""
@@ -1664,7 +1663,7 @@ class BaseConfig:
 								option.get('options', None)
 							)
 
-	def add_option(self, name, section, key, default, val_type, help_text, options=None):
+	def add_option(self, name, section, key, default='', val_type='str', help_text='', options=None):
 		"""
 		Add a configuration option to the available list
 
@@ -1712,7 +1711,7 @@ class BaseConfig:
 			return value
 
 	@classmethod
-	def convert_from_system_type(cls, value: Union[str, int, bool], val_type: str) -> str:
+	def convert_from_system_type(cls, value: Union[str, int, bool, list, float], val_type: str) -> Union[str, list]:
 		"""
 		Convert a system type value to a string for storage
 		:param value:
@@ -1727,6 +1726,15 @@ class BaseConfig:
 				return 'True'
 			else:
 				return 'False'
+		elif val_type == 'list':
+			if isinstance(value, list):
+				return value
+			else:
+				# Assume comma-separated string
+				return [item.strip() for item in str(value).split(',')]
+		elif val_type == 'float':
+			# Unreal likes floats to be stored with 6 decimal places
+			return f'{float(value):.6f}'
 		else:
 			return str(value)
 
@@ -2288,300 +2296,6 @@ def run_manager(game):
 				sys.exit(1)
 			svc = services[0]
 			menu_service(svc)
-
-def steamcmd_parse_manifest(manifest_content):
-	"""
-	Parses a SteamCMD manifest file content and returns a dictionary
-	with the all the relevant information.
-
-	Example format of content to parse:
-
-	"2131400"
-	{
-		"common"
-		{
-			"name"		"VEIN Dedicated Server"
-			"type"		"Tool"
-			"parent"		"1857950"
-			"ReleaseState"		"released"
-			"oslist"		"windows,linux"
-			"osarch"		"64"
-			"osextended"		""
-			"icon"		"7573f431d9ecd0e9dc21f4406f884b92152508fd"
-			"clienticon"		"b5de75f7c5f84027200fdafe0483caaeb80f7dbe"
-			"clienttga"		"6012ea81d68607ad0dfc5610e61f17101373c1fd"
-			"freetodownload"		"1"
-			"associations"
-			{
-			}
-			"gameid"		"2131400"
-		}
-		"extended"
-		{
-			"gamedir"		""
-		}
-		"config"
-		{
-			"installdir"		"VEIN Dedicated Server"
-			"launch"
-			{
-				"0"
-				{
-					"executable"		"VeinServer.exe"
-					"type"		"default"
-					"config"
-					{
-						"oslist"		"windows"
-					}
-					"description_loc"
-					{
-						"english"		"VEIN Dedicated Server"
-					}
-					"description"		"VEIN Dedicated Server"
-				}
-				"1"
-				{
-					"executable"		"VeinServer.sh"
-					"type"		"default"
-					"config"
-					{
-						"oslist"		"linux"
-					}
-					"description_loc"
-					{
-						"english"		"VEIN Dedicated Server"
-					}
-					"description"		"VEIN Dedicated Server"
-				}
-			}
-			"uselaunchcommandline"		"1"
-		}
-		"depots"
-		{
-			"228989"
-			{
-				"config"
-				{
-					"oslist"		"windows"
-				}
-				"depotfromapp"		"228980"
-				"sharedinstall"		"1"
-			}
-			"228990"
-			{
-				"config"
-				{
-					"oslist"		"windows"
-				}
-				"depotfromapp"		"228980"
-				"sharedinstall"		"1"
-			}
-			"2131401"
-			{
-				"config"
-				{
-					"oslist"		"windows"
-				}
-				"manifests"
-				{
-					"public"
-					{
-						"gid"		"3422721066391688500"
-						"size"		"13373528354"
-						"download"		"4719647568"
-					}
-					"experimental"
-					{
-						"gid"		"5376672931011513884"
-						"size"		"14053570688"
-						"download"		"4881399680"
-					}
-				}
-			}
-			"2131402"
-			{
-				"config"
-				{
-					"oslist"		"linux"
-				}
-				"manifests"
-				{
-					"public"
-					{
-						"gid"		"4027172715479418364"
-						"size"		"14134939630"
-						"download"		"4869512928"
-					}
-					"experimental"
-					{
-						"gid"		"643377871134354986"
-						"size"		"14712396815"
-						"download"		"4982816608"
-					}
-				}
-			}
-			"branches"
-			{
-				"public"
-				{
-					"buildid"		"20727232"
-					"timeupdated"		"1762674215"
-				}
-				"experimental"
-				{
-					"buildid"		"20729593"
-					"description"		"Bleeding-edge updates"
-					"timeupdated"		"1762704776"
-				}
-			}
-			"privatebranches"		"1"
-		}
-	}
-
-	:param manifest_content: str, content of the SteamCMD manifest file
-	:return: dict, parsed manifest data
-	"""
-	lines = manifest_content.splitlines()
-	stack = []
-	current_dict = {}
-	current_key = None
-
-	for line in lines:
-		line = line.strip()
-		if line == '{':
-			new_dict = {}
-			if current_key is not None:
-				current_dict[current_key] = new_dict
-			stack.append((current_dict, current_key))
-			current_dict = new_dict
-			current_key = None
-		elif line == '}':
-			if stack:
-				current_dict, current_key = stack.pop()
-		else:
-			match = re.match(r'"(.*?)"\s*"(.*?)"', line)
-			if match:
-				key, value = match.groups()
-				current_dict[key] = value
-			else:
-				match = re.match(r'"(.*?)"', line)
-				if match:
-					current_key = match.group(1)
-
-	return current_dict
-
-
-
-def steamcmd_get_app_details(app_id: str, steamcmd_path: str = None) -> Union[dict, None]:
-	"""
-	Get detailed information about a Steam app using steamcmd
-
-	Returns a dictionary with:
-
-	- common
-		- name
-		- type
-		- parent
-		- ReleaseState
-		- oslist
-		- osarch
-		- osextended
-		- icon
-		- clienticon
-		- clienttga
-		- freetodownload
-		- associations
-		- gameid
-	- extended
-		- gamedir
-	- config
-		- installdir
-		- launch
-		- uselaunchcommandline
-	- depots
-
-	:param app_id:
-	:param steamcmd_path:
-	:return:
-	"""
-	if steamcmd_path is None:
-		# Try to find steamcmd in the common locations
-		paths = ("/usr/games/steamcmd", "/usr/local/games/steamcmd", "/opt/steamcmd/steamcmd.sh")
-		for path in paths:
-			if os.path.exists(path):
-				steamcmd_path = path
-				break
-		else:
-			print('steamcmd not found in common locations. Please provide the path to steamcmd.', file=sys.stderr)
-			return None
-
-	# Construct the command to get app details
-	command = [
-		steamcmd_path,
-		"+login", "anonymous",
-		"+app_info_update", "1",
-		"+app_info_print", str(app_id),
-		"+quit"
-	]
-
-	try:
-		# Run the steamcmd command
-		result = subprocess.run(command, capture_output=True, text=True, check=True)
-
-		# Output from command should be Steam manifest format, parse it
-		dat = steamcmd_parse_manifest(result.stdout)
-		if app_id in dat:
-			return dat[app_id]
-		else:
-			print(f"App ID {app_id} not found in steamcmd output.", file=sys.stderr)
-			return None
-
-	except subprocess.CalledProcessError as e:
-		print(f"Error running steamcmd: {e}")
-		return None
-
-
-def steamcmd_check_app_update(app_manifest: str):
-	if not os.path.exists(app_manifest):
-		print(f"App manifest file {app_manifest} does not exist.", file=sys.stderr)
-		return False
-
-	# App manifest is a local copy of the app JSON data
-	with open(app_manifest, 'r') as f:
-		details = steamcmd_parse_manifest(f.read())
-
-	if 'AppState' not in details:
-		print(f"Invalid app manifest format in {app_manifest}.", file=sys.stderr)
-		return False
-
-	# Pull local data about the installed game from its manifest file
-	app_id = details['AppState']['appid']
-	build_id = details['AppState']['buildid']
-
-	if 'MountedConfig' in details['AppState'] and 'BetaKey' in details['AppState']['MountedConfig']:
-		branch = details['AppState']['MountedConfig']['BetaKey']
-	else:
-		branch = 'public'
-
-	# Pull the latest app details from SteamCMD
-	details = steamcmd_get_app_details(app_id)
-
-	# Ensure some basic data integrity
-	if 'depots' not in details:
-		print(f"No depot information found for app {app_id}.", file=sys.stderr)
-		return False
-
-	if 'branches' not in details['depots']:
-		print(f"No branch information found for app {app_id}.", file=sys.stderr)
-		return False
-
-	if branch not in details['depots']['branches']:
-		print(f"Branch {branch} not found for app {app_id}.", file=sys.stderr)
-		return False
-
-	# Just check if the build IDs differ
-	available_build_id = details['depots']['branches'][branch]['buildid']
-	return build_id != available_build_id
 
 here = os.path.dirname(os.path.realpath(__file__))
 

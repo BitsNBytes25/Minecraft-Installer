@@ -16,7 +16,6 @@ from scriptlets.warlock.rcon_service import *
 from scriptlets.warlock.ini_config import *
 from scriptlets.warlock.properties_config import *
 from scriptlets.warlock.default_run import *
-from scriptlets.steam.steamcmd_check_app_update import *
 
 here = os.path.dirname(os.path.realpath(__file__))
 
