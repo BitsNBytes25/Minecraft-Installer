@@ -37,7 +37,7 @@
 ############################################
 
 # Name of the game (used to create the directory)
-INSTALLER_VERSION="v20251127~DEV"
+INSTALLER_VERSION="v20251129"
 GAME="Minecraft"
 GAME_DESC="Minecraft Dedicated Server"
 REPO="BitsNBytes25/Minecraft-Installer"
