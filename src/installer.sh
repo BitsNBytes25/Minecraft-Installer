@@ -104,7 +104,8 @@ function install_application() {
 		echo "You must agree to the EULA to continue, exiting." >&2
 		exit 1
 	fi
-	sudo -u $GAME_USER echo "eula=true" > "$GAME_DIR/AppFiles/eula.txt"
+	echo "eula=true" > "$GAME_DIR/AppFiles/eula.txt"
+	chown $GAME_USER:$GAME_USER "$GAME_DIR/AppFiles/eula.txt"
 
 	# Install the management script
 	install_warlock_manager "$REPO" "$INSTALLER_VERSION"
