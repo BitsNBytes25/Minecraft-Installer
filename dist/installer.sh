@@ -522,9 +522,11 @@ function install_warlock_manager() {
 	if [[ "$INSTALLER_VERSION" == *"~DEV"* ]]; then
 		# Development version, pull from dev branch
 		SRC="https://raw.githubusercontent.com/${REPO}/refs/heads/dev/dist/manage.py"
+		echo "Trying to download manage.py from dev branch on $REPO"
 	else
 		# Stable version, pull from tagged release
 		SRC="https://raw.githubusercontent.com/${REPO}/refs/tags/${INSTALLER_VERSION}/dist/manage.py"
+		echo "Trying to download manage.py from $INSTALLER_VERSION tag on $REPO"
 	fi
 
 	if ! download "$SRC" "$GAME_DIR/manage.py"; then
