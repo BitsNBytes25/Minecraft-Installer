@@ -56,6 +56,7 @@ GAME_SERVICE="minecraft-server"
 # scriptlet:bz_eval_tui/prompt_yn.sh
 # scriptlet:bz_eval_tui/print_header.sh
 # scriptlet:ufw/install.sh
+# scriptlet:warlock/install_warlock_manager.sh
 
 print_header "$GAME_DESC *unofficial* Installer ${INSTALLER_VERSION}"
 

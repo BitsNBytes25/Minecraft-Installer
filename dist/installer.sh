@@ -504,6 +504,479 @@ function install_ufw() {
 		ufw allow from $TTY_IP comment 'Anti-lockout rule based on first install of UFW'
 	fi
 }
+##
+# Install the management script from the project's repo
+#
+# Expects the following variables:
+#   GAME_USER    - User account to install the game under
+#   GAME_DIR     - Directory to install the game into
+#
+function install_warlock_manager() {
+	print_header "Performing install_management"
+
+	# Install management console and its dependencies
+	local SRC=""
+	local REPO="$1"
+	local INSTALLER_VERSION="$2"
+
+	if [[ "$INSTALLER_VERSION" == *"~DEV"* ]]; then
+		# Development version, pull from dev branch
+		SRC="https://raw.githubusercontent.com/${REPO}/refs/heads/dev/dist/manage.py"
+	else
+		# Stable version, pull from tagged release
+		SRC="https://raw.githubusercontent.com/${REPO}/refs/tags/${INSTALLER_VERSION}/dist/manage.py"
+	fi
+
+	if ! download "$SRC" "$GAME_DIR/manage.py"; then
+		# Fallback to main branch
+		echo "Download failed, falling back to main branch..." >&2
+		SRC="https://raw.githubusercontent.com/${REPO}/refs/heads/main/dist/manage.py"
+		if ! download "$SRC" "$GAME_DIR/manage.py"; then
+			echo "Could not download management script!" >&2
+			exit 1
+		fi
+	fi
+
+	chown $GAME_USER:$GAME_USER "$GAME_DIR/manage.py"
+	chmod +x "$GAME_DIR/manage.py"
+
+	# Install configuration definitions
+	cat > "$GAME_DIR/configs.yaml" <<EOF
+server:
+  - name: Accepts Transfers
+    key: accepts-transfers
+    type: bool
+    default: false
+    help: "Whether to accept incoming transfers via a transfer packet."
+  - name: Allow Flight
+    key: allow-flight
+    type: bool
+    default: false
+    help: "Whether to allow players to fly."
+  - name: Broadcast Console to Ops
+    key: broadcast-console-to-ops
+    type: bool
+    default: true
+    help: "Whether to broadcast console messages to operators."
+  - name: Broadcast RCON to Ops
+    key: broadcast-rcon-to-ops
+    type: bool
+    default: true
+    help: "Whether to broadcast RCON messages to operators."
+  - name: Bug Report Link
+    key: bug-report-link
+    type: str
+    default: ""
+    help: "A link to your bug reporting platform, shown when players use the /bugreport command."
+  - name: Difficulty
+    key: difficulty
+    type: str
+    default: normal
+    options:
+      - peaceful
+      - easy
+      - normal
+      - hard
+    help: "Sets the game difficulty."
+  - name: Enable Code of Conduct
+    key: enable-code-of-conduct
+    type: bool
+    default: false
+    help: "Whether to enable the code of conduct enforcement."
+  - name: Enable JMX Monitoring
+    key: enable-jmx-monitoring
+    type: bool
+    default: false
+    help: "Whether to enable JMX monitoring for the server."
+  - name: Enable Query
+    key: enable-query
+    type: bool
+    default: false
+    help: "Whether to enable the query protocol."
+  - name: Enable RCON
+    key: enable-rcon
+    type: bool
+    default: false
+    help: "Whether to enable RCON (Remote Console) for server management."
+  - name: Enable Status
+    key: enable-status
+    type: bool
+    default: true
+    help: "Whether to enable the server status query."
+  - name: Enable Secure Profile
+    key: enable-secure-profile
+    type: bool
+    default: true
+    help: "Whether to enable secure profile handling."
+  - name: Enable Whitelist
+    key: enable-whitelist
+    type: bool
+    default: false
+    help: "Whether to enable the server whitelist."
+  - name: Enforce Whitelist on Login
+    key: enforce-whitelist-on-login
+    type: bool
+    default: false
+    help: "Whether to enforce the whitelist when players log in."
+  - name: Entity Broadcast Range Percentage
+    key: entity-broadcast-range-percentage
+    type: int
+    default: 100
+    help: "Sets the percentage of the entity broadcast range."
+  - name: Force Gamemode
+    key: force-gamemode
+    type: bool
+    default: false
+    help: "Whether to force players into the default gamemode upon joining."
+  - name: Function Permission Level
+    key: function-permission-level
+    type: int
+    default: 2
+    help: "Sets the permission level required to use server functions."
+  - name: Gamemode
+    key: gamemode
+    type: str
+    default: survival
+    options:
+      - survival
+      - creative
+      - adventure
+      - spectator
+    help: "Sets the default gamemode for players."
+  - name: Generate Structures
+    key: generate-structures
+    type: bool
+    default: true
+    help: "Whether to generate structures like villages and temples."
+  - name: Generator Settings
+    key: generator-settings
+    type: str
+    default: "{}"
+    help: "Custom settings for world generation."
+  - name: Hardcore
+    key: hardcore
+    type: bool
+    default: false
+    help: "Whether to enable hardcore mode."
+  - name: Hide Online Players
+    key: hide-online-players
+    type: bool
+    default: false
+    help: "Whether to hide the number of online players from the server list."
+  - name: Initial Disabled Packs
+    key: initial-disabled-packs
+    type: str
+    default: ""
+    help: "A comma-separated list of data packs to be disabled when the world is created."
+  - name: Initial Enabled Packs
+    key: initial-enabled-packs
+    type: str
+    default: "vanilla"
+    help: "A comma-separated list of data packs to be enabled when the world is created."
+  - name: Level Name
+    key: level-name
+    type: str
+    default: world
+    help: "The name of the world folder."
+  - name: Level Seed
+    key: level-seed
+    type: str
+    default: ""
+    help: "The seed used to generate the world."
+  - name: Level Type
+    key: level-type
+    type: str
+    default: "minecraft:normal"
+    options:
+      - minecraft:normal
+      - minecraft:flat
+      - minecraft:large_biomes
+      - minecraft:amplified
+      - minecraft:single_biome_surface
+    help: "The type of world to generate."
+  - name: Log IPs
+    key: log-ips
+    type: bool
+    default: true
+    help: "Whether to log player IP addresses."
+  - name: Management Server Enabled
+    key: management-server-enabled
+    type: bool
+    default: false
+    help: "Whether to enable the management server for remote administration."
+  - name: Management Server Host
+    key: management-server-host
+    type: str
+    default: "localhost"
+    help: "The host address for the management server."
+  - name: Management Server Port
+    key: management-server-port
+    type: int
+    default: 0
+    help: "The port number for the management server."
+  - name: Management Server Secret
+    key: management-server-secret
+    type: str
+    default: ""
+    help: "The secret key for authenticating with the management server."
+  - name: Management Server TLS Enabled
+    key: management-server-tls-enabled
+    type: bool
+    default: true
+    help: "Whether to enable TLS for the management server."
+  - name: Management Server TLS Keystore
+    key: management-server-tls-keystore
+    type: str
+    default: ""
+    help: "The keystore file for TLS on the management server."
+  - name: Management Server TLS Keystore Password
+    key: management-server-tls-keystore-password
+    type: str
+    default: ""
+    help: "The password for the TLS keystore on the management server."
+  - name: Max Chained Neighbor Updates
+    key: max-chained-neighbor-updates
+    type: int
+    default: 1000000
+    help: "The maximum number of block updates that can be chained together."
+  - name: Max Players
+    key: max-players
+    type: int
+    default: 20
+    help: "The maximum number of players allowed on the server."
+  - name: Max Tick Time
+    key: max-tick-time
+    type: int
+    default: 60000
+    help: "The maximum time (in milliseconds) a single tick can take before the server is considered frozen."
+  - name: Max World Size
+    key: max-world-size
+    type: int
+    default: 29999984
+    help: "The maximum size of the world in blocks."
+  - name: MOTD
+    key: motd
+    type: str
+    default: A Minecraft Server
+    help: "The message of the day displayed in the server list."
+  - name: Network Compression Threshold
+    key: network-compression-threshold
+    type: int
+    default: 256
+    help: "The threshold (in bytes) for network compression."
+  - name: Online Mode
+    key: online-mode
+    type: bool
+    default: true
+    help: "Whether to enable online mode (authentication with Mojang servers)."
+  - name: Op Permission Level
+    key: op-permission-level
+    type: int
+    default: 4
+    help: "Sets the permission level for server operators."
+  - name: Pause When Empty Seconds
+    key: pause-when-empty-seconds
+    type: int
+    default: 60
+    help: "The number of seconds to wait before pausing the server when no players are online."
+  - name: Player Idle Timeout
+    key: player-idle-timeout
+    type: int
+    default: 0
+    help: "The time (in minutes) before an idle player is kicked from the server. 0 disables this feature."
+  - name: Prevent Proxy Connections
+    key: prevent-proxy-connections
+    type: bool
+    default: false
+    help: "Whether to prevent connections from known proxy servers."
+  - name: Query Port
+    key: query.port
+    type: int
+    default: 25565
+    help: "The port number for the query protocol."
+  - name: Rate Limit
+    key: rate-limit
+    type: int
+    default: 0
+    help: "The maximum number of packets per second a player can send. 0 disables rate limiting."
+  - name: RCON Password
+    key: rcon.password
+    type: str
+    default: ""
+    help: "The password for RCON access."
+  - name: RCON Port
+    key: rcon.port
+    type: int
+    default: 25575
+    help: "The port number for RCON access."
+  - name: Region File Compression
+    key: region-file-compression
+    type: str
+    default: deflate
+    options:
+      - none
+      - zlib
+      - deflate
+    help: "The algorithm used for compressing chunks in regions."
+  - name: Require Resource Pack
+    key: require-resource-pack
+    type: bool
+    default: false
+    help: "Whether to require players to use the server's resource pack."
+  - name: Resource Pack
+    key: resource-pack
+    type: str
+    default: ""
+    help: "The URL of the resource pack to be used by players."
+  - name: Resource Pack ID
+    key: resource-pack-id
+    type: str
+    default: ""
+    help: "An optional UUID for the resource pack set by resource-pack to identify the pack with clients. "
+  - name: Resource Pack Prompt
+    key: resource-pack-prompt
+    type: str
+    default: ""
+    help: "The message shown to players when asking them to accept the resource pack."
+  - name: Resource Pack SHA1
+    key: resource-pack-sha1
+    type: str
+    default: ""
+    help: "The SHA-1 hash of the resource pack file for integrity verification."
+  - name: Server IP
+    key: server-ip
+    type: str
+    default: ""
+    help: "The IP address the server listens on."
+  - name: Server Port
+    key: server-port
+    type: int
+    default: 25565
+    help: "The port number the server listens on."
+  - name: Simulation Distance
+    key: simulation-distance
+    type: int
+    default: 10
+    help: "The distance (in chunks) that the server simulates around each player."
+  - name: Spawn Protection
+    key: spawn-protection
+    type: int
+    default: 16
+    help: "The radius (in blocks) around the world spawn point that is protected from player modifications."
+  - name: Status Heartbeat Interval
+    key: status-heartbeat-interval
+    type: int
+    default: 5
+    help: "The interval (in seconds) between status heartbeats."
+  - name: Sync Chunk Writes
+    key: sync-chunk-writes
+    type: bool
+    default: true
+    help: "Whether to synchronize chunk writes to disk."
+  - name: Text Filtering Config
+    key: text-filtering-config
+    type: str
+    default: ""
+    help: "The configuration for text filtering."
+  - name: Text Filtering Version
+    key: text-filtering-version
+    type: int
+    default: 0
+    help: "The version of the text filtering configuration."
+  - name: Use Native Transport
+    key: use-native-transport
+    type: bool
+    default: true
+    help: "Whether to use native transport libraries for better performance."
+  - name: View Distance
+    key: view-distance
+    type: int
+    default: 10
+    help: "The distance (in chunks) that players can see."
+  - name: Whitelist
+    key: white-list
+    type: bool
+    default: false
+    help: "Whether the whitelist is enabled."
+manager:
+  - name: Shutdown Warning 5 Minutes
+    section: Messages
+    key: shutdown_5min
+    type: str
+    default: Server is shutting down in 5 minutes
+    help: "Custom message broadcasted to players 5 minutes before server shutdown."
+  - name: Shutdown Warning 4 Minutes
+    section: Messages
+    key: shutdown_4min
+    type: str
+    default: Server is shutting down in 4 minutes
+    help: "Custom message broadcasted to players 4 minutes before server shutdown."
+  - name: Shutdown Warning 3 Minutes
+    section: Messages
+    key: shutdown_3min
+    type: str
+    default: Server is shutting down in 3 minutes
+    help: "Custom message broadcasted to players 3 minutes before server shutdown."
+  - name: Shutdown Warning 2 Minutes
+    section: Messages
+    key: shutdown_2min
+    type: str
+    default: Server is shutting down in 2 minutes
+    help: "Custom message broadcasted to players 2 minutes before server shutdown."
+  - name: Shutdown Warning 1 Minute
+    section: Messages
+    key: shutdown_1min
+    type: str
+    default: Server is shutting down in 1 minute
+    help: "Custom message broadcasted to players 1 minute before server shutdown."
+  - name: Shutdown Warning 30 Seconds
+    section: Messages
+    key: shutdown_30sec
+    type: str
+    default: Server is shutting down in 30 seconds!
+    help: "Custom message broadcasted to players 30 seconds before server shutdown."
+  - name: Shutdown Warning NOW
+    section: Messages
+    key: shutdown_now
+    type: str
+    default: Server is shutting down NOW!
+    help: "Custom message broadcasted to players immediately before server shutdown."
+  - name: Instance Started (Discord)
+    section: Discord
+    key: instance_started
+    type: str
+    default: "{instance} has started! :rocket:"
+    help: "Custom message sent to Discord when the server starts, use '{instance}' to insert the map name"
+  - name: Instance Stopping (Discord)
+    section: Discord
+    key: instance_stopping
+    type: str
+    default: ":small_red_triangle_down: {instance} is shutting down"
+    help: "Custom message sent to Discord when the server stops, use '{instance}' to insert the map name"
+  - name: Discord Enabled
+    section: Discord
+    key: enabled
+    type: bool
+    default: false
+    help: "Enables or disables Discord integration for server status updates."
+  - name: Discord Webhook URL
+    section: Discord
+    key: webhook
+    type: str
+    help: "The webhook URL for sending server status updates to a Discord channel."
+EOF
+	chown $GAME_USER:$GAME_USER "$GAME_DIR/configs.yaml"
+
+	# Most games use .settings.ini for manager settings
+	touch "$GAME_DIR/.settings.ini"
+	chown $GAME_USER:$GAME_USER "$GAME_DIR/.settings.ini"
+
+	# If a pyenv is required:
+	sudo -u $GAME_USER python3 -m venv "$GAME_DIR/.venv"
+	sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install --upgrade pip
+	sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install pyyaml
+}
+
 
 print_header "$GAME_DESC *unofficial* Installer ${INSTALLER_VERSION}"
 
