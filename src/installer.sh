@@ -45,7 +45,6 @@ WARLOCK_GUID="700798f0-35be-bc6c-da84-62c510dfbd06"
 GAME_USER="minecraft"
 GAME_DIR="/home/${GAME_USER}"
 GAME_SERVICE="minecraft-server"
-GAME_SOURCE="https://piston-data.mojang.com/v1/objects/95495a7f485eedd84ce928cef5e223b757d2f764/server.jar"
 
 # compile:usage
 # compile:argparse
@@ -106,12 +105,16 @@ function install_application() {
 	fi
 	sudo -u $GAME_USER echo "eula=true" > "$GAME_DIR/AppFiles/eula.txt"
 
-	if ! download "$GAME_SOURCE" "$GAME_DIR/AppFiles/minecraft_server.jar"; then
+	# Install the management script
+	install_warlock_manager "$REPO" "$INSTALLER_VERSION"
+	# This management script needs rcon.
+	sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install rcon
+
+	# Use the management script to install the game server
+	if ! $GAME_DIR/manage.py --update; then
 		echo "Could not install $GAME_DESC, exiting" >&2
 		exit 1
 	fi
-
-	chown $GAME_USER:$GAME_USER "$GAME_DIR/AppFiles/minecraft_server.jar"
 
 	# Install system service file to be loaded by systemd
     cat > /etc/systemd/system/${GAME_SERVICE}.service <<EOF
@@ -124,47 +127,6 @@ EOF
 		[ -d "/var/lib/warlock" ] || mkdir -p "/var/lib/warlock"
 		echo -n "$GAME_DIR" > "/var/lib/warlock/${WARLOCK_GUID}.app"
 	fi
-}
-
-##
-# Install the management script from the project's repo
-#
-# Expects the following variables:
-#   GAME_USER    - User account to install the game under
-#   GAME_DIR     - Directory to install the game into
-#
-function install_management() {
-	print_header "Performing install_management"
-
-	# Install management console and its dependencies
-	local SRC=""
-
-	if [[ "$INSTALLER_VERSION" == *"~DEV"* ]]; then
-		# Development version, pull from dev branch
-		SRC="https://raw.githubusercontent.com/${REPO}/refs/heads/dev/dist/manage.py"
-	else
-		# Stable version, pull from tagged release
-		SRC="https://raw.githubusercontent.com/${REPO}/refs/tags/${INSTALLER_VERSION}/dist/manage.py"
-	fi
-
-	if ! download "$SRC" "$GAME_DIR/manage.py"; then
-		echo "Could not download management script!" >&2
-		exit 1
-	fi
-
-	chown $GAME_USER:$GAME_USER "$GAME_DIR/manage.py"
-	chmod +x "$GAME_DIR/manage.py"
-
-	# Install configuration definitions
-	cat > "$GAME_DIR/configs.yaml" <<EOF
-# script:configs.yaml
-EOF
-
-	# If a pyenv is required:
-	sudo -u $GAME_USER python3 -m venv "$GAME_DIR/.venv"
-	sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install --upgrade pip
-	sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install pyyaml
-	sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install rcon
 }
 
 function postinstall() {
@@ -268,8 +230,6 @@ if [ "$MODE" == "install" ]; then
 	fi
 
 	install_application
-
-	install_management
 
 	postinstall
 

@@ -22,10 +22,10 @@ sys.path.insert(
 	)
 )
 import yaml
+import json
 import random
 import string
 import datetime
-import json
 import shutil
 from rcon.source import Client
 from rcon import SessionTimeout
@@ -591,6 +591,24 @@ class BaseApp:
 		"""
 		return False
 
+	def update(self) -> bool:
+		"""
+		Update the game server
+
+		:return:
+		"""
+		return False
+
+	def post_update(self):
+		"""
+		Perform any post-update actions needed for this game
+
+		Called immediately after an update is performed but before services are restarted.
+
+		:return:
+		"""
+		pass
+
 	def send_discord_message(self, message: str):
 		"""
 		Send a message to the configured Discord webhook
@@ -690,11 +708,18 @@ class BaseApp:
 				src = os.path.join(save_source, f)
 				dst = os.path.join(temp_store, 'save', f)
 				if os.path.exists(src):
-					print('Backing up save file: %s' % src)
 					if os.path.isfile(src):
+						print('Backing up save file: %s' % src)
+						if not os.path.exists(os.path.dirname(dst)):
+							os.makedirs(os.path.dirname(dst))
 						shutil.copy(src, dst)
 					else:
-						shutil.copytree(src, dst)
+						print('Backing up save directory: %s' % src)
+						if not os.path.exists(dst):
+							os.makedirs(dst)
+						shutil.copytree(src, dst, dirs_exist_ok=True)
+				else:
+					print('Save file %s does not exist, skipping...' % src, file=sys.stderr)
 
 		return temp_store
 
@@ -1381,13 +1406,6 @@ class BaseService:
 		"""
 		pass
 
-	def post_start(self) -> bool:
-		"""
-		Perform the necessary operations for after a game has started
-		:return:
-		"""
-		pass
-
 	def start(self):
 		"""
 		Start this service in systemd
@@ -1520,7 +1538,8 @@ class BaseService:
 		"""
 		if self.is_api_enabled():
 			counter = 0
-			print('Waiting for API to become available...')
+			print('Waiting for API to become available...', file=sys.stderr)
+			time.sleep(15)
 			while counter < 24:
 				players = self.get_player_count()
 				if players is not None:
@@ -1531,7 +1550,16 @@ class BaseService:
 						self.game.send_discord_message(msg)
 					return True
 				else:
-					print('API not available yet')
+					print('API not available yet', file=sys.stderr)
+
+				# Is the game PID still available?
+				if self.get_pid() == 0:
+					print('Game process has exited unexpectedly!', file=sys.stderr)
+					return False
+
+				if self.get_game_pid() == 0:
+					print('Game server process has exited unexpectedly!', file=sys.stderr)
+					return False
 
 				time.sleep(10)
 				counter += 1
@@ -1657,7 +1685,7 @@ class BaseConfig:
 								option.get('name'),
 								option.get('section'),
 								option.get('key'),
-								option.get('default'),
+								option.get('default', None),
 								option.get('type', 'str'),
 								option.get('help', ''),
 								option.get('options', None)
@@ -1678,10 +1706,14 @@ class BaseConfig:
 
 		# Ensure boolean defaults are stored as strings
 		# They get re-converted back to bools on retrieval
-		if val_type == 'bool' and default is True:
-			default = 'True'
-		elif val_type == 'bool' and default is False:
-			default = 'False'
+		if val_type == 'bool':
+			if default is True:
+				default = 'True'
+			elif default is False:
+				default = 'False'
+			elif default is None:
+				# No default specified, default to False
+				default = 'False'
 
 		if default is None:
 			default = ''
@@ -2175,6 +2207,11 @@ def run_manager(game):
 		action='store_true'
 	)
 	parser.add_argument(
+		'--update',
+		help='Update the game server to the latest version',
+		action='store_true'
+	)
+	parser.add_argument(
 		'--get-services',
 		help='List the available service instances for this game (JSON encoded)',
 		action='store_true'
@@ -2252,6 +2289,8 @@ def run_manager(game):
 		sys.exit(0 if game.restore(args.restore) else 1)
 	elif args.check_update:
 		sys.exit(0 if game.check_update_available() else 1)
+	elif args.update:
+		sys.exit(0 if game.update() else 1)
 	elif args.get_services:
 		menu_get_services(game)
 	elif args.get_configs:
@@ -2299,9 +2338,6 @@ def run_manager(game):
 
 here = os.path.dirname(os.path.realpath(__file__))
 
-# Require sudo / root for starting/stopping the service
-IS_SUDO = os.geteuid() == 0
-
 
 class GameApp(BaseApp):
 	"""
@@ -2323,12 +2359,78 @@ class GameApp(BaseApp):
 
 	def check_update_available(self) -> bool:
 		"""
-		Check if a SteamCMD update is available for this game
+		Check if an update is available for this game
 
 		:return:
 		"""
-		# @todo Implement update check for Minecraft
-		return False
+		if os.path.exists(os.path.join(here, '.version')):
+			with open(os.path.join(here, '.version'), 'r') as f:
+				current_version = f.read().strip()
+			try:
+				with request.urlopen('https://net-secondary.web.minecraft-services.net/api/v1.0/download/latest') as resp:
+					dat = json.loads(resp.read().decode('utf-8'))
+					return 'result' in dat and dat['result'] != current_version
+			except urllib_error.HTTPError:
+				return False
+			except urllib_error.URLError:
+				return False
+		else:
+			return True
+
+	def update(self):
+		"""
+		Update the game server to the latest version
+
+		:return:
+		"""
+		print_header('Updating Minecraft Server')
+
+		try:
+			latest_version = None
+			with request.urlopen('https://net-secondary.web.minecraft-services.net/api/v1.0/download/latest') as resp:
+				dat = json.loads(resp.read().decode('utf-8'))
+				if 'result' in dat:
+					latest_version = dat['result']
+
+			if latest_version is None:
+				print('Failed to retrieve latest version information.', file=sys.stderr)
+				return False
+
+			download_url = None
+			with request.urlopen('https://net-secondary.web.minecraft-services.net/api/v1.0/download/links') as resp:
+				dat = json.loads(resp.read().decode('utf-8'))
+				if 'result' in dat and 'links' in dat['result']:
+					for link in dat['result']['links']:
+						if link['downloadType'] == 'serverJar':
+							download_url = link['downloadUrl']
+							break
+
+			if download_url is None:
+				print('Failed to retrieve download URL for latest version.', file=sys.stderr)
+				return False
+
+			print('Downloading Minecraft Server version %s...' % latest_version)
+			with request.urlopen(download_url) as download_resp:
+				with open(os.path.join(here, 'AppFiles/minecraft_server.jar'), 'wb') as out_file:
+					out_file.write(download_resp.read())
+			with open(os.path.join(here, '.version'), 'w') as f:
+				f.write(latest_version)
+			print('Update complete.')
+
+			if os.geteuid == 0:
+				stat_info = os.stat(here)
+				uid = stat_info.st_uid
+				gid = stat_info.st_gid
+				os.chown(os.path.join(here, 'AppFiles/minecraft_server.jar'), uid, gid)
+				os.chown(os.path.join(here, '.version'), uid, gid)
+			return True
+
+		except urllib_error.HTTPError:
+			print('Failed to download the latest version (HTTP Error).', file=sys.stderr)
+			return False
+		except urllib_error.URLError:
+			print('Failed to download the latest version (URL Error).', file=sys.stderr)
+			return False
 
 	def get_save_files(self) -> Union[list, None]:
 		"""
@@ -2485,7 +2587,7 @@ def menu_first_run(game: GameApp):
 	"""
 	print_header('First Run Configuration')
 
-	if not IS_SUDO:
+	if os.geteuid() != 0:
 		print('ERROR: Please run this script with sudo to perform first-run configuration.')
 		sys.exit(1)
 

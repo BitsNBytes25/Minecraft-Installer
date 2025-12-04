@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import pwd
+import sys
 from scriptlets._common.firewall_allow import *
 from scriptlets._common.firewall_remove import *
 from scriptlets.bz_eval_tui.prompt_yn import *
@@ -9,6 +10,7 @@ from scriptlets.bz_eval_tui.print_header import *
 from scriptlets._common.get_wan_ip import *
 # import:org_python/venv_path_include.py
 import yaml
+import json
 import random
 import string
 from scriptlets.warlock.base_app import *
@@ -16,11 +18,10 @@ from scriptlets.warlock.rcon_service import *
 from scriptlets.warlock.ini_config import *
 from scriptlets.warlock.properties_config import *
 from scriptlets.warlock.default_run import *
+from urllib import request
+from urllib import error as urllib_error
 
 here = os.path.dirname(os.path.realpath(__file__))
-
-# Require sudo / root for starting/stopping the service
-IS_SUDO = os.geteuid() == 0
 
 
 class GameApp(BaseApp):
@@ -43,12 +44,78 @@ class GameApp(BaseApp):
 
 	def check_update_available(self) -> bool:
 		"""
-		Check if a SteamCMD update is available for this game
+		Check if an update is available for this game
 
 		:return:
 		"""
-		# @todo Implement update check for Minecraft
-		return False
+		if os.path.exists(os.path.join(here, '.version')):
+			with open(os.path.join(here, '.version'), 'r') as f:
+				current_version = f.read().strip()
+			try:
+				with request.urlopen('https://net-secondary.web.minecraft-services.net/api/v1.0/download/latest') as resp:
+					dat = json.loads(resp.read().decode('utf-8'))
+					return 'result' in dat and dat['result'] != current_version
+			except urllib_error.HTTPError:
+				return False
+			except urllib_error.URLError:
+				return False
+		else:
+			return True
+
+	def update(self):
+		"""
+		Update the game server to the latest version
+
+		:return:
+		"""
+		print_header('Updating Minecraft Server')
+
+		try:
+			latest_version = None
+			with request.urlopen('https://net-secondary.web.minecraft-services.net/api/v1.0/download/latest') as resp:
+				dat = json.loads(resp.read().decode('utf-8'))
+				if 'result' in dat:
+					latest_version = dat['result']
+
+			if latest_version is None:
+				print('Failed to retrieve latest version information.', file=sys.stderr)
+				return False
+
+			download_url = None
+			with request.urlopen('https://net-secondary.web.minecraft-services.net/api/v1.0/download/links') as resp:
+				dat = json.loads(resp.read().decode('utf-8'))
+				if 'result' in dat and 'links' in dat['result']:
+					for link in dat['result']['links']:
+						if link['downloadType'] == 'serverJar':
+							download_url = link['downloadUrl']
+							break
+
+			if download_url is None:
+				print('Failed to retrieve download URL for latest version.', file=sys.stderr)
+				return False
+
+			print('Downloading Minecraft Server version %s...' % latest_version)
+			with request.urlopen(download_url) as download_resp:
+				with open(os.path.join(here, 'AppFiles/minecraft_server.jar'), 'wb') as out_file:
+					out_file.write(download_resp.read())
+			with open(os.path.join(here, '.version'), 'w') as f:
+				f.write(latest_version)
+			print('Update complete.')
+
+			if os.geteuid == 0:
+				stat_info = os.stat(here)
+				uid = stat_info.st_uid
+				gid = stat_info.st_gid
+				os.chown(os.path.join(here, 'AppFiles/minecraft_server.jar'), uid, gid)
+				os.chown(os.path.join(here, '.version'), uid, gid)
+			return True
+
+		except urllib_error.HTTPError:
+			print('Failed to download the latest version (HTTP Error).', file=sys.stderr)
+			return False
+		except urllib_error.URLError:
+			print('Failed to download the latest version (URL Error).', file=sys.stderr)
+			return False
 
 	def get_save_files(self) -> Union[list, None]:
 		"""
@@ -205,7 +272,7 @@ def menu_first_run(game: GameApp):
 	"""
 	print_header('First Run Configuration')
 
-	if not IS_SUDO:
+	if os.geteuid() != 0:
 		print('ERROR: Please run this script with sudo to perform first-run configuration.')
 		sys.exit(1)
 
