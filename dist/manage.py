@@ -2417,7 +2417,7 @@ class GameApp(BaseApp):
 				f.write(latest_version)
 			print('Update complete.')
 
-			if os.geteuid == 0:
+			if os.geteuid() == 0:
 				stat_info = os.stat(here)
 				uid = stat_info.st_uid
 				gid = stat_info.st_gid
