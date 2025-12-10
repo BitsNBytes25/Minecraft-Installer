@@ -262,6 +262,17 @@ class GameService(RCONService):
 		"""
 		self._api_cmd('save-all flush')
 
+	def get_port_definitions(self) -> list:
+		"""
+		Get a list of port definitions for this service
+		:return:
+		"""
+		return [
+			('Query Port', 'udp', '%s query port' % self.game.desc),
+			('Server Port', 'tcp', '%s game port' % self.game.desc),
+			('RCON Port', 'tcp', '%s RCON port' % self.game.desc)
+		]
+
 
 def menu_first_run(game: GameApp):
 	"""
