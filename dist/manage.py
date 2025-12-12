@@ -1379,7 +1379,7 @@ class BaseService:
 		:param lines:
 		:return:
 		"""
-		subprocess.run(['journalctl', '-u', self.service, '-n', str(lines), '--no-pager'])
+		subprocess.run(['journalctl', '-qu', self.service, '-n', str(lines), '--no-pager'])
 
 	def get_logs(self, lines: int = 20) -> str:
 		"""
@@ -1388,7 +1388,7 @@ class BaseService:
 		:return:
 		"""
 		return subprocess.run(
-			['journalctl', '-u', self.service, '-n', str(lines), '--no-pager'],
+			['journalctl', '-qu', self.service, '-n', str(lines), '--no-pager'],
 			stdout=subprocess.PIPE
 		).stdout.decode()
 
@@ -2141,13 +2141,9 @@ class PropertiesConfig(BaseConfig):
 		Save the configuration file back to disk
 		:return:
 		"""
-		with open(self.path, 'w') as cfgfile:
-			for key, value in self.values.items():
-				# Escape '%' characters that may be present
-				escaped_value = value.replace(':', '\\:')
-				cfgfile.write(f'{key}={escaped_value}\n')
-
 		# Change ownership to game user if running as root
+		uid = None
+		gid = None
 		if os.geteuid() == 0:
 			# Determine game user based on parent directories
 			check_path = os.path.dirname(self.path)
@@ -2156,9 +2152,35 @@ class PropertiesConfig(BaseConfig):
 					stat_info = os.stat(check_path)
 					uid = stat_info.st_uid
 					gid = stat_info.st_gid
-					os.chown(self.path, uid, gid)
 					break
 				check_path = os.path.dirname(check_path)
+
+		# Ensure directory exists
+		# This can't just be a simple os.makedirs call since we need to set ownership
+		# on each created directory if running as root
+		if not os.path.exists(os.path.dirname(self.path)):
+			paths = os.path.dirname(self.path).split('/')
+			check_path = ''
+			for part in paths:
+				if part == '':
+					continue
+				check_path += '/' + part
+				if not os.path.exists(check_path):
+					os.mkdir(check_path, 0o755)
+					if os.geteuid() == 0 and uid is not None and gid is not None:
+						os.chown(check_path, uid, gid)
+
+		with open(self.path, 'w') as cfgfile:
+			for key, value in self.values.items():
+				# Escape '%' characters that may be present
+				escaped_value = value.replace(':', '\\:')
+				cfgfile.write(f'{key}={escaped_value}\n')
+
+		if os.geteuid() == 0 and uid is not None and gid is not None:
+			os.chown(self.path, uid, gid)
+
+
+
 
 
 def menu_get_services(game):
@@ -2245,6 +2267,11 @@ def run_manager(game):
 	parser.add_argument(
 		'--is-running',
 		help='Check if any game service is currently running (exit code 0 = yes, 1 = no)',
+		action='store_true'
+	)
+	parser.add_argument(
+		'--has-players',
+		help='Check if any players are currently connected to any game service (exit code 0 = yes, 1 = no)',
 		action='store_true'
 	)
 
@@ -2416,6 +2443,21 @@ def run_manager(game):
 			print('First-run configuration is not supported for this game.', file=sys.stderr)
 			sys.exit(1)
 		menu_first_run(game)
+	elif args.has_players:
+		has_players = False
+		for svc in services:
+			c = svc.get_player_count()
+			if c is not None and c > 0:
+				has_players = True
+				break
+		sys.exit(0 if has_players else 1)
+	elif args.is_running:
+		is_running = False
+		for svc in services:
+			if svc.is_running():
+				is_running = True
+				break
+		sys.exit(0 if is_running else 1)
 	else:
 		if len(services) > 1:
 			if not callable(getattr(sys.modules[__name__], 'menu_main', None)):
@@ -2428,6 +2470,7 @@ def run_manager(game):
 				sys.exit(1)
 			svc = services[0]
 			menu_service(svc)
+
 
 
 here = os.path.dirname(os.path.realpath(__file__))

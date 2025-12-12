@@ -108,7 +108,7 @@ function install_application() {
 	chown $GAME_USER:$GAME_USER "$GAME_DIR/AppFiles/eula.txt"
 
 	# Install the management script
-	install_warlock_manager "$REPO" "$INSTALLER_VERSION"
+	install_warlock_manager "$REPO"
 	# This management script needs rcon.
 	sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install rcon
 
