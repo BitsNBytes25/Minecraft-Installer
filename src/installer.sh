@@ -25,9 +25,10 @@
 #
 # Syntax:
 #   MODE_UNINSTALL=--uninstall - Perform an uninstallation
-#   OVERRIDE_DIR=--dir=<path> - Use a custom installation directory instead of the default (optional)
+#   OVERRIDE_DIR=--dir=<str> - Use a custom installation directory instead of the default (optional)
 #   SKIP_FIREWALL=--skip-firewall - Do not install or configure a system firewall
 #   NONINTERACTIVE=--non-interactive - Run the installer in non-interactive mode (useful for scripted installs)
+#   BRANCH=--branch=<str> - Use a specific branch of the management script repository DEFAULT=main
 #
 # Changelog:
 #   20251103 - New installer
@@ -108,9 +109,14 @@ function install_application() {
 	chown $GAME_USER:$GAME_USER "$GAME_DIR/AppFiles/eula.txt"
 
 	# Install the management script
-	install_warlock_manager "$REPO"
+	install_warlock_manager "$REPO" "$BRANCH"
 	# This management script needs rcon.
 	sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install rcon
+
+	# Install installer (this script) for uninstallation or manual work
+	download "https://raw.githubusercontent.com/${REPO}/refs/heads/${BRANCH}/dist/installer.sh" "$GAME_DIR/installer.sh"
+	chmod +x "$GAME_DIR/installer.sh"
+	chown $GAME_USER:$GAME_USER "$GAME_DIR/installer.sh"
 
 	# Use the management script to install the game server
 	if ! $GAME_DIR/manage.py --update; then

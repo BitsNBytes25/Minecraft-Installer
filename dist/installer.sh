@@ -25,9 +25,10 @@
 #
 # Syntax:
 #   --uninstall  - Perform an uninstallation
-#   --dir=<path> - Use a custom installation directory instead of the default (optional)
+#   --dir=<str> - Use a custom installation directory instead of the default (optional)
 #   --skip-firewall  - Do not install or configure a system firewall
 #   --non-interactive  - Run the installer in non-interactive mode (useful for scripted installs)
+#   --branch=<str> - Use a specific branch of the management script repository DEFAULT=main
 #
 # Changelog:
 #   20251103 - New installer
@@ -52,9 +53,10 @@ Usage: $0 [options]
 
 Options:
     --uninstall  - Perform an uninstallation
-    --dir=<path> - Use a custom installation directory instead of the default (optional)
+    --dir=<str> - Use a custom installation directory instead of the default (optional)
     --skip-firewall  - Do not install or configure a system firewall
     --non-interactive  - Run the installer in non-interactive mode (useful for scripted installs)
+    --branch=<str> - Use a specific branch of the management script repository DEFAULT=main
 
 Please ensure to run this script as root (or at least with sudo)
 
@@ -68,6 +70,7 @@ MODE_UNINSTALL=0
 OVERRIDE_DIR=""
 SKIP_FIREWALL=0
 NONINTERACTIVE=0
+BRANCH="main"
 while [ "$#" -gt 0 ]; do
 	case "$1" in
 		--uninstall) MODE_UNINSTALL=1; shift 1;;
@@ -78,6 +81,11 @@ while [ "$#" -gt 0 ]; do
 			shift 1;;
 		--skip-firewall) SKIP_FIREWALL=1; shift 1;;
 		--non-interactive) NONINTERACTIVE=1; shift 1;;
+		--branch=*)
+			BRANCH="${1#*=}";
+			[ "${BRANCH:0:1}" == "'" ] && [ "${BRANCH:0-1}" == "'" ] && BRANCH="${BRANCH:1:-1}"
+			[ "${BRANCH:0:1}" == '"' ] && [ "${BRANCH:0-1}" == '"' ] && BRANCH="${BRANCH:1:-1}"
+			shift 1;;
 		-h|--help) usage;;
 	esac
 done
@@ -517,8 +525,9 @@ function install_warlock_manager() {
 	# Install management console and its dependencies
 	local SRC=""
 	local REPO="$1"
+	local BRANCH="${2:-main}"
 
-	SRC="https://raw.githubusercontent.com/${REPO}/refs/heads/main/dist/manage.py"
+	SRC="https://raw.githubusercontent.com/${REPO}/refs/heads/${BRANCH}/dist/manage.py"
 
 	if ! download "$SRC" "$GAME_DIR/manage.py"; then
 		echo "Could not download management script!" >&2
@@ -1016,9 +1025,14 @@ function install_application() {
 	chown $GAME_USER:$GAME_USER "$GAME_DIR/AppFiles/eula.txt"
 
 	# Install the management script
-	install_warlock_manager "$REPO"
+	install_warlock_manager "$REPO" "$BRANCH"
 	# This management script needs rcon.
 	sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install rcon
+
+	# Install installer (this script) for uninstallation or manual work
+	download "https://raw.githubusercontent.com/${REPO}/refs/heads/${BRANCH}/dist/installer.sh" "$GAME_DIR/installer.sh"
+	chmod +x "$GAME_DIR/installer.sh"
+	chown $GAME_USER:$GAME_USER "$GAME_DIR/installer.sh"
 
 	# Use the management script to install the game server
 	if ! $GAME_DIR/manage.py --update; then

@@ -9,9 +9,10 @@
         "name": "Install Minecraft Server",
         "syntax": [
             "--uninstall  - Perform an uninstallation",
-            "--dir=<path> - Use a custom installation directory instead of the default (optional)",
+            "--dir=<str> - Use a custom installation directory instead of the default (optional)",
             "--skip-firewall  - Do not install or configure a system firewall",
-            "--non-interactive  - Run the installer in non-interactive mode (useful for scripted installs)"
+            "--non-interactive  - Run the installer in non-interactive mode (useful for scripted installs)",
+            "--branch=<str> - Use a specific branch of the management script repository DEFAULT=main"
         ],
         "default_timeout": "600",
         "shell": "shell",
