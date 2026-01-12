@@ -34,6 +34,7 @@ import time
 import configparser
 import tempfile
 import argparse
+import logging
 
 def get_enabled_firewall() -> str:
 	"""
@@ -366,7 +367,7 @@ def get_wan_ip() -> Union[str, None]:
 	:return: str: The external IP address as a string, or None if it cannot be determined
 	"""
 	try:
-		with request.urlopen('https://api.ipify.org') as resp:
+		with request.urlopen('https://api.ipify.org', timeout=2) as resp:
 			return resp.read().decode('utf-8')
 	except urllib_error.HTTPError:
 		return None
@@ -1105,6 +1106,13 @@ class BaseService:
 		"""
 		pass
 
+	def get_players(self) -> Union[list, None]:
+		"""
+		Get a list of current players on the server, or None if the API is unavailable
+		:return:
+		"""
+		pass
+
 	def get_pid(self) -> int:
 		"""
 		Get the PID of the running service, or 0 if not running
@@ -1620,6 +1628,9 @@ class RCONService(BaseService):
 		:param cmd:
 		:return: None if RCON not available, or the result of the command
 		"""
+		# Some game servers don't handle RCON very well, so try a few times before giving up.
+		retry = 6
+
 		if not (self.is_running() or self.is_starting() or self.is_stopping()):
 			# If service is not running, don't even try to connect.
 			return None
@@ -1639,12 +1650,19 @@ class RCONService(BaseService):
 			print("RCON password is not set!  Please populate get_api_password definition.", file=sys.stderr)
 			return None
 
-		try:
-			with Client('127.0.0.1', port, passwd=password, timeout=2) as client:
-				return client.run(cmd).strip()
-		except Exception as e:
-			print(str(e), file=sys.stderr)
-			return None
+		counter = 0
+		while counter < retry:
+			counter += 1
+			try:
+				with Client('127.0.0.1', port, passwd=password, timeout=5) as client:
+					ret = client.run(cmd, enforce_id=False).strip()
+					client.close()
+					return ret
+			except Exception as e:
+				print('Failed to establish RCON connection (attempt %s): %s' % (str(counter), str(e)), file=sys.stderr)
+
+		print('All RCON connection attempts failed.', file=sys.stderr)
+		return None
 
 	def is_api_enabled(self) -> bool:
 		"""
@@ -2183,6 +2201,138 @@ class PropertiesConfig(BaseConfig):
 
 
 
+def menu_delayed_action_game(game, action):
+	"""
+	If players are logged in, send 5-minute notifications for an hour before stopping the server
+
+	This action applies to ALL game instances under this application.
+
+	:param game:
+	:param action:
+	:return:
+	"""
+
+	if not action in ['stop', 'restart', 'update']:
+		print('ERROR - Invalid action for delayed action: %s' % action, file=sys.stderr)
+		return
+
+	if os.geteuid() != 0:
+		print('ERROR - Unable to stop game service unless run with sudo', file=sys.stderr)
+		return
+
+	msg = game.get_option_value('%s_delayed' % action)
+	if msg == '':
+		msg = 'Server will %s in {time} minutes. Please prepare to log off safely.' % action
+
+	start = round(time.time())
+	services_running = []
+	services = game.get_services()
+
+	print('Issuing %s for all services, please wait as this will give players up to an hour to log off safely.' % action)
+
+	while True:
+		still_running = False
+		minutes_left = 55 - ((round(time.time()) - start) // 60)
+
+		for service in services:
+			if service.is_running():
+				still_running = True
+				if service.service not in services_running:
+					services_running.append(service.service)
+
+				player_count = service.get_player_count()
+
+				if player_count == 0 or player_count is None:
+					# No players online, stop the service
+					print('No players detected on %s, stopping service now.' % service.service)
+					service.stop()
+				else:
+					# Still online, check to see if we should send a message
+					if '{time}' in msg:
+						msg = msg.replace('{time}', str(minutes_left))
+
+					if minutes_left <= 5:
+						# Once the timer hits 5 minutes left, drop to the standard stop procedure.
+						service.stop()
+
+					if minutes_left % 5 == 0 and minutes_left > 5:
+						# Send the warning every 5 minutes
+						service.send_message(msg)
+
+		if minutes_left % 5 == 0 and minutes_left > 5:
+			print('%s minutes remaining before %s.' % (str(minutes_left), action))
+
+		if not still_running or minutes_left <= 0:
+			# No services are running, stop the timer
+			break
+
+		time.sleep(60)
+
+	if action == 'update':
+		# Now that all services have been stopped, perform the update
+		game.update()
+
+	if action == 'restart' or action == 'update':
+		# Now that all services have been stopped, restart any that were running before
+		for service in services:
+			if service.service in services_running:
+				print('Restarting %s' % service.service)
+				service.start()
+
+
+def menu_delayed_action(service, action):
+	"""
+	If players are logged in, send 5-minute notifications for an hour before stopping the server
+
+	:param service:
+	:param action:
+	:return:
+	"""
+
+	if not action in ['stop', 'restart']:
+		print('ERROR - Invalid action for delayed action: %s' % action, file=sys.stderr)
+		return
+
+	if os.geteuid() != 0:
+		print('ERROR - Unable to stop game service unless run with sudo', file=sys.stderr)
+		return
+
+	start = round(time.time())
+	msg = service.game.get_option_value('%s_delayed' % action)
+	if msg == '':
+		msg = 'Server will %s in {time} minutes. Please prepare to log off safely.' % action
+
+	print('Issuing %s for %s, please wait as this will give players up to an hour to log off safely.' % (action, service.service))
+
+	while True:
+		minutes_left = 55 - ((round(time.time()) - start) // 60)
+		player_count = service.get_player_count()
+
+		if player_count == 0 or player_count is None:
+			# No players online, stop the timer
+			break
+
+		if '{time}' in msg:
+			msg = msg.replace('{time}', str(minutes_left))
+
+		if minutes_left <= 5:
+			# Once the timer hits 5 minutes left, drop to the standard stop procedure.
+			break
+
+		if minutes_left % 5 == 0:
+			service.send_message(msg)
+
+		if minutes_left % 5 == 0 and minutes_left > 5:
+			print('%s minutes remaining before %s.' % (str(minutes_left), action))
+
+		time.sleep(60)
+
+	if action == 'stop':
+		service.stop()
+	else:
+		service.restart()
+
+
 def menu_get_services(game):
 	"""
 	Get the list of all services for this game in JSON format
@@ -2235,6 +2385,14 @@ def menu_get_metrics(game):
 		if start_exec and start_exec['stop_time']:
 			start_exec['stop_time'] = int(start_exec['stop_time'].timestamp())
 
+		players = svc.get_players()
+		# Some games may not support getting a full player list
+		if players is None:
+			players = []
+			player_count = svc.get_player_count()
+		else:
+			player_count = len(players)
+
 		svc_stats = {
 			'service': svc.service,
 			'name': svc.get_name(),
@@ -2242,7 +2400,8 @@ def menu_get_metrics(game):
 			'port': svc.get_port(),
 			'status': status,
 			'enabled': svc.is_enabled(),
-			'player_count': svc.get_player_count(),
+			'players': players,
+			'player_count': player_count,
 			'max_players': svc.get_player_max(),
 			'memory_usage': svc.get_memory_usage(),
 			'cpu_usage': svc.get_cpu_usage(),
@@ -2257,118 +2416,160 @@ def menu_get_metrics(game):
 
 def run_manager(game):
 	parser = argparse.ArgumentParser('manage.py')
+	game_actions = parser.add_argument_group(
+		'Game Commands',
+		'Perform a given action on the game server, only compatible WITHOUT --service'
+	)
+	service_actions = parser.add_argument_group(
+		'Service Commands',
+		'Perform a given action on a game instance, MUST be used with --service'
+	)
+	shared_actions = parser.add_argument_group(
+		'Shared Commands',
+		'Perform a given action on either the game server or a specific instance when used with --service'
+	)
+
+	parser.add_argument(
+		'--debug',
+		help='Enable debug logging output',
+		action='store_true'
+	)
 
 	# Service specification - some options can only be performed on a given service
 	parser.add_argument(
 		'--service',
 		help='Specify the service instance to manage (default: ALL)',
 		type=str,
-		default='ALL'
+		default='ALL',
+		metavar='service-name'
 	)
 
 	# Basic start/stop operations
-	parser.add_argument(
-		'--pre-stop',
-		help='Send notifications to game players and Discord and save the world',
-		action='store_true'
-	)
-	parser.add_argument(
-		'--post-start',
-		help='Send notifications to game players and Discord after starting the server',
-		action='store_true'
-	)
-	parser.add_argument(
-		'--stop',
-		help='Stop the game server',
-		action='store_true'
-	)
-	parser.add_argument(
+	shared_actions.add_argument(
 		'--start',
-		help='Start the game server',
+		help='Start all instances of this game server or a specific server when used with --service',
 		action='store_true'
 	)
-	parser.add_argument(
+	shared_actions.add_argument(
+		'--stop',
+		help='Stop all instances of this game server or a specific server when used with --service',
+		action='store_true'
+	)
+	shared_actions.add_argument(
 		'--restart',
-		help='Restart the game server',
+		help='Restart the game server or specific instance when used with --service',
 		action='store_true'
 	)
-	parser.add_argument(
+	shared_actions.add_argument(
+		'--delayed-stop',
+		help='Send a 1-hour warning to players before stopping the game server or instance when used with --service',
+		action='store_true'
+	)
+	shared_actions.add_argument(
+		'--delayed-restart',
+		help='Send a 1-hour warning to players before restarting the game server or specific instance when used with --service',
+		action='store_true'
+	)
+	game_actions.add_argument(
+		'--update',
+		help='Update the game server to the latest version',
+		action='store_true'
+	)
+	game_actions.add_argument(
+		'--delayed-update',
+		help='Send a 1-hour warning to players before updating the game server',
+		action='store_true'
+	)
+
+	service_actions.add_argument(
+		'--pre-stop',
+		help='Send notifications to game players and Discord and save the world, (called automatically)',
+		action='store_true'
+	)
+	service_actions.add_argument(
+		'--post-start',
+		help='Send notifications to Discord, (called automatically)',
+		action='store_true'
+	)
+
+	shared_actions.add_argument(
 		'--is-running',
 		help='Check if any game service is currently running (exit code 0 = yes, 1 = no)',
 		action='store_true'
 	)
-	parser.add_argument(
+	shared_actions.add_argument(
 		'--has-players',
 		help='Check if any players are currently connected to any game service (exit code 0 = yes, 1 = no)',
 		action='store_true'
 	)
 
 	# Backup/restore operations
-	parser.add_argument(
+	game_actions.add_argument(
 		'--backup',
 		help='Backup the game server files',
 		action='store_true'
 	)
 	parser.add_argument(
 		'--max-backups',
-		help='Maximum number of backups to keep when creating a new backup (default: 0 = unlimited)',
+		help='Maximum number of backups to keep when creating a new backup (default: 0 = unlimited), expected to be used with --backup',
 		type=int,
 		default=0
 	)
-	parser.add_argument(
+	game_actions.add_argument(
 		'--restore',
 		help='Restore the game server files from a backup archive',
 		type=str,
-		default=''
+		default='',
+		metavar='/path/to/backup-filename.tar.gz'
 	)
 
-	parser.add_argument(
+	game_actions.add_argument(
 		'--check-update',
 		help='Check for game updates and report the status',
 		action='store_true'
 	)
-	parser.add_argument(
-		'--update',
-		help='Update the game server to the latest version',
-		action='store_true'
-	)
-	parser.add_argument(
+
+	game_actions.add_argument(
 		'--get-services',
 		help='List the available service instances for this game (JSON encoded)',
 		action='store_true'
 	)
-	parser.add_argument(
+	shared_actions.add_argument(
 		'--get-configs',
 		help='List the available configuration files for this game or instance (JSON encoded)',
 		action='store_true'
 	)
-	parser.add_argument(
+	shared_actions.add_argument(
 		'--set-config',
 		help='Set a configuration option for the game',
 		type=str,
-		nargs=2
+		nargs=2,
+		metavar=('option', 'value')
 	)
-	parser.add_argument(
+	shared_actions.add_argument(
 		'--get-ports',
 		help='Get the network ports used by all game services (JSON encoded)',
 		action='store_true'
 	)
-	parser.add_argument(
+	'''parser.add_argument(
 		'--logs',
 		help='Print the latest logs from the game service',
 		action='store_true'
-	)
-	parser.add_argument(
+	)'''
+	game_actions.add_argument(
 		'--first-run',
 		help='Perform first-run configuration for setting up the game server initially',
 		action='store_true'
 	)
-	parser.add_argument(
+	game_actions.add_argument(
 		'--get-metrics',
 		help='Get performance metrics from the game server (JSON encoded)',
 		action='store_true'
 	)
 	args = parser.parse_args()
+
+	if args.debug:
+		logging.basicConfig(level=logging.DEBUG)
 
 	services = game.get_services()
 
@@ -2493,6 +2694,21 @@ def run_manager(game):
 				is_running = True
 				break
 		sys.exit(0 if is_running else 1)
+	elif args.delayed_stop:
+		if len(services) > 1:
+			menu_delayed_action_game(game, 'stop')
+		else:
+			menu_delayed_action(services[0], 'stop')
+	elif args.delayed_restart:
+		if len(services) > 1:
+			menu_delayed_action_game(game, 'restart')
+		else:
+			menu_delayed_action(services[0], 'restart')
+	elif args.delayed_update:
+		if args.service != 'ALL':
+			print('ERROR: --delayed-update can only be used when managing all service instances.', file=sys.stderr)
+			sys.exit(1)
+		menu_delayed_action_game(game, 'update')
 	else:
 		if len(services) > 1:
 			if not callable(getattr(sys.modules[__name__], 'menu_main', None)):
