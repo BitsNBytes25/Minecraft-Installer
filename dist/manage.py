@@ -310,6 +310,23 @@ class GameService(RCONService):
 			('RCON Port', 'tcp', '%s RCON port' % self.game.desc)
 		]
 
+	def get_commands(self) -> None | list[str]:
+		"""
+		Get a list of custom command strings to display in the UI for this service, or None for no custom commands
+		:return:
+		"""
+		cmds = self.cmd('/help')
+		if cmds is None:
+			print('Failed to retrieve command list from server.', file=sys.stderr)
+			return None
+
+		# Minecraft jumbles all the commands on a single line, (for whatever reason...)
+		commands = []
+		for cmd in cmds.split('/'):
+			commands.append('/' + cmd)
+
+		return commands
+
 if __name__ == '__main__':
 	app = app_runner(GameApp())
 	app()
