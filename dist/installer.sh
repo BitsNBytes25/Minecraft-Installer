@@ -1242,7 +1242,7 @@ function install_openjdk() {
 		tar -x -C /opt/script-collection/ -f "/opt/script-collection/$JDK_TGZ"
 	fi
 
-	echo "/opt/script-collection/$JDK_TGZ"
+	echo "/opt/script-collection/$JDK_DIR"
 }
 
 
