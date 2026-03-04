@@ -73,21 +73,23 @@ NONINTERACTIVE=0
 BRANCH="main"
 while [ "$#" -gt 0 ]; do
 	case "$1" in
-		--uninstall) MODE_UNINSTALL=1; shift 1;;
-		--dir=*)
-			OVERRIDE_DIR="${1#*=}";
+		--uninstall) MODE_UNINSTALL=1;;
+		--dir=*|--dir)
+			[ "$1" == "--dir" ] && shift 1 && OVERRIDE_DIR="$1" || OVERRIDE_DIR="${1#*=}"
 			[ "${OVERRIDE_DIR:0:1}" == "'" ] && [ "${OVERRIDE_DIR:0-1}" == "'" ] && OVERRIDE_DIR="${OVERRIDE_DIR:1:-1}"
 			[ "${OVERRIDE_DIR:0:1}" == '"' ] && [ "${OVERRIDE_DIR:0-1}" == '"' ] && OVERRIDE_DIR="${OVERRIDE_DIR:1:-1}"
-			shift 1;;
-		--skip-firewall) SKIP_FIREWALL=1; shift 1;;
-		--non-interactive) NONINTERACTIVE=1; shift 1;;
-		--branch=*)
-			BRANCH="${1#*=}";
+			;;
+		--skip-firewall) SKIP_FIREWALL=1;;
+		--non-interactive) NONINTERACTIVE=1;;
+		--branch=*|--branch)
+			[ "$1" == "--branch" ] && shift 1 && BRANCH="$1" || BRANCH="${1#*=}"
 			[ "${BRANCH:0:1}" == "'" ] && [ "${BRANCH:0-1}" == "'" ] && BRANCH="${BRANCH:1:-1}"
 			[ "${BRANCH:0:1}" == '"' ] && [ "${BRANCH:0-1}" == '"' ] && BRANCH="${BRANCH:1:-1}"
-			shift 1;;
+			;;
 		-h|--help) usage;;
+		*) echo "Unknown argument: $1" >&2; usage;;
 	esac
+	shift 1
 done
 
 ##
@@ -736,6 +738,9 @@ function install_ufw() {
 # @param $1 Repo Name (e.g., user/repo)
 # @param $2 Branch Name (default: main)
 #
+# CHANGELOG:
+#   20260301 - Update to install warlock-manager from github (along with its dependencies) as a pip package
+#
 function install_warlock_manager() {
 	print_header "Performing install_management"
 
@@ -1185,10 +1190,10 @@ EOF
 	touch "$GAME_DIR/.settings.ini"
 	chown $GAME_USER:$GAME_USER "$GAME_DIR/.settings.ini"
 
-	# If a pyenv is required:
+	# A python virtual environment is now required by Warlock-based managers.
 	sudo -u $GAME_USER python3 -m venv "$GAME_DIR/.venv"
 	sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install --upgrade pip
-	sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install pyyaml
+	sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install warlock-manager@git+https://github.com/BitsNBytes25/Warlock-Manager.git@main
 }
 
 
@@ -1305,8 +1310,6 @@ function install_application() {
 
 	# Install the management script
 	install_warlock_manager "$REPO" "$BRANCH"
-	# This management script needs rcon.
-	sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install rcon
 
 	# Install installer (this script) for uninstallation or manual work
 	download "https://raw.githubusercontent.com/${REPO}/refs/heads/${BRANCH}/dist/installer.sh" "$GAME_DIR/installer.sh"
@@ -1314,7 +1317,7 @@ function install_application() {
 	chown $GAME_USER:$GAME_USER "$GAME_DIR/installer.sh"
 
 	# Use the management script to install the game server
-	if ! $GAME_DIR/manage.py --update; then
+	if ! $GAME_DIR/manage.py update; then
 		echo "Could not install $GAME_DESC, exiting" >&2
 		exit 1
 	fi
@@ -1356,7 +1359,7 @@ function postinstall() {
 	print_header "Performing postinstall"
 
 	# First run setup
-	$GAME_DIR/manage.py --first-run
+	$GAME_DIR/manage.py first-run
 }
 
 ##
@@ -1471,7 +1474,7 @@ if [ "$MODE" == "uninstall" ]; then
 	fi
 
 	if prompt_yn -q --default-yes "Perform a backup before everything is wiped?"; then
-		$GAME_DIR/manage.py --backup
+		$GAME_DIR/manage.py backup
 	fi
 
 	uninstall_application

@@ -119,8 +119,6 @@ function install_application() {
 
 	# Install the management script
 	install_warlock_manager "$REPO" "$BRANCH"
-	# This management script needs rcon.
-	sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install rcon
 
 	# Install installer (this script) for uninstallation or manual work
 	download "https://raw.githubusercontent.com/${REPO}/refs/heads/${BRANCH}/dist/installer.sh" "$GAME_DIR/installer.sh"
@@ -128,7 +126,7 @@ function install_application() {
 	chown $GAME_USER:$GAME_USER "$GAME_DIR/installer.sh"
 
 	# Use the management script to install the game server
-	if ! $GAME_DIR/manage.py --update; then
+	if ! $GAME_DIR/manage.py update; then
 		echo "Could not install $GAME_DESC, exiting" >&2
 		exit 1
 	fi
@@ -150,7 +148,7 @@ function postinstall() {
 	print_header "Performing postinstall"
 
 	# First run setup
-	$GAME_DIR/manage.py --first-run
+	$GAME_DIR/manage.py first-run
 }
 
 ##
@@ -265,7 +263,7 @@ if [ "$MODE" == "uninstall" ]; then
 	fi
 
 	if prompt_yn -q --default-yes "Perform a backup before everything is wiped?"; then
-		$GAME_DIR/manage.py --backup
+		$GAME_DIR/manage.py backup
 	fi
 
 	uninstall_application

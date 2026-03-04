@@ -1,25 +1,20 @@
 #!/usr/bin/env python3
-import pwd
 import sys
-from scriptlets._common.firewall_allow import *
-from scriptlets._common.firewall_remove import *
-from scriptlets.bz_eval_tui.prompt_yn import *
-from scriptlets.bz_eval_tui.prompt_text import *
-from scriptlets.bz_eval_tui.table import *
-from scriptlets.bz_eval_tui.print_header import *
-from scriptlets._common.get_wan_ip import *
-# import:org_python/venv_path_include.py
-import yaml
+import os
 import json
 import random
 import string
-from scriptlets.warlock.base_app import *
-from scriptlets.warlock.rcon_service import *
-from scriptlets.warlock.ini_config import *
-from scriptlets.warlock.properties_config import *
-from scriptlets.warlock.default_run import *
 from urllib import request
-from urllib import error as urllib_error
+import urllib.error as urllib_error
+
+# import:org_python/venv_path_include.py
+from warlock_manager.apps.base_app import BaseApp
+from warlock_manager.config.ini_config import INIConfig
+from warlock_manager.config.properties_config import PropertiesConfig
+from warlock_manager.libs.app_runner import app_runner
+from warlock_manager.libs.firewall import Firewall
+from warlock_manager.libs.tui import print_header
+from warlock_manager.services.rcon_service import RCONService
 
 here = os.path.dirname(os.path.realpath(__file__))
 
@@ -36,6 +31,7 @@ class GameApp(BaseApp):
 		self.desc = 'Minecraft Java Edition'
 		self.services = ('minecraft-server',)
 		self._svcs = None
+		self.service_handler = GameService
 
 		self.configs = {
 			'manager': INIConfig('manager', os.path.join(here, '.settings.ini'))
@@ -117,7 +113,7 @@ class GameApp(BaseApp):
 			print('Failed to download the latest version (URL Error).', file=sys.stderr)
 			return False
 
-	def get_save_files(self) -> Union[list, None]:
+	def get_save_files(self) -> list | None:
 		"""
 		Get a list of save files / directories for the game server
 
@@ -130,13 +126,40 @@ class GameApp(BaseApp):
 			files.append(service.get_name() + '_the_end')
 		return files
 
-	def get_save_directory(self) -> Union[str, None]:
+	def get_save_directory(self) -> str | None:
 		"""
 		Get the save directory for the game server
 
 		:return:
 		"""
 		return os.path.join(here, 'AppFiles')
+
+	def first_run(self) -> bool:
+		"""
+		Perform first-run configuration for setting up the game server initially
+
+		:param game:
+		:return:
+		"""
+		print_header('First Run Configuration')
+
+		if os.geteuid() != 0:
+			print('ERROR: Please run this script with sudo to perform first-run configuration.')
+			return False
+
+		svc = self.get_services()[0]
+
+		svc.option_ensure_set('Level Name')
+		svc.option_ensure_set('Server Port')
+		svc.option_ensure_set('RCON Port')
+		if not svc.option_has_value('RCON Password'):
+			# Generate a random password for RCON
+			random_password = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
+			svc.set_option('RCON Password', random_password)
+		if not svc.option_has_value('Enable RCON'):
+			svc.set_option('Enable RCON', True)
+
+		return True
 
 
 class GameService(RCONService):
@@ -169,13 +192,13 @@ class GameService(RCONService):
 		if option == 'Server Port':
 			# Update firewall for game port change
 			if previous_value:
-				firewall_remove(int(previous_value), 'tcp')
-			firewall_allow(int(new_value), 'tcp', 'Allow %s game port' % self.game.desc)
+				Firewall.remove(int(previous_value), 'tcp')
+			Firewall.allow(int(new_value), 'tcp', 'Allow %s game port' % self.game.desc)
 		elif option == 'Query Port':
 			# Update firewall for game port change
 			if previous_value:
-				firewall_remove(int(previous_value), 'udp')
-			firewall_allow(int(new_value), 'udp', 'Allow %s query port' % self.game.desc)
+				Firewall.remove(int(previous_value), 'udp')
+			Firewall.allow(int(new_value), 'udp', 'Allow %s query port' % self.game.desc)
 
 	def is_api_enabled(self) -> bool:
 		"""
@@ -202,13 +225,13 @@ class GameService(RCONService):
 		"""
 		return self.get_option_value('RCON Password')
 
-	def get_player_count(self) -> Union[int, None]:
+	def get_player_count(self) -> int | None:
 		"""
 		Get the current player count on the server, or None if the API is unavailable
 		:return:
 		"""
 		try:
-			ret = self._api_cmd('/list')
+			ret = self.cmd('/list')
 			# ret should contain 'There are N of a max...' where N is the player count.
 			if ret is None:
 				return None
@@ -233,7 +256,7 @@ class GameService(RCONService):
 		"""
 		return self.get_option_value('Level Name')
 
-	def get_port(self) -> Union[int, None]:
+	def get_port(self) -> int | None:
 		"""
 		Get the primary port of the service, or None if not applicable
 		:return:
@@ -255,14 +278,14 @@ class GameService(RCONService):
 		:param message:
 		:return:
 		"""
-		self._api_cmd('/say %s' % message)
+		self.cmd('/say %s' % message)
 
 	def save_world(self):
 		"""
 		Force the game server to save the world via the game API
 		:return:
 		"""
-		self._api_cmd('save-all flush')
+		self.cmd('save-all flush')
 
 	def get_port_definitions(self) -> list:
 		"""
@@ -275,32 +298,6 @@ class GameService(RCONService):
 			('RCON Port', 'tcp', '%s RCON port' % self.game.desc)
 		]
 
-
-def menu_first_run(game: GameApp):
-	"""
-	Perform first-run configuration for setting up the game server initially
-
-	:param game:
-	:return:
-	"""
-	print_header('First Run Configuration')
-
-	if os.geteuid() != 0:
-		print('ERROR: Please run this script with sudo to perform first-run configuration.')
-		sys.exit(1)
-
-	svc = game.get_services()[0]
-
-	svc.option_ensure_set('Level Name')
-	svc.option_ensure_set('Server Port')
-	svc.option_ensure_set('RCON Port')
-	if not svc.option_has_value('RCON Password'):
-		# Generate a random password for RCON
-		random_password = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
-		svc.set_option('RCON Password', random_password)
-	if not svc.option_has_value('Enable RCON'):
-		svc.set_option('Enable RCON', True)
-
 if __name__ == '__main__':
-	game = GameApp()
-	run_manager(game)
+	app = app_runner(GameApp())
+	app()
