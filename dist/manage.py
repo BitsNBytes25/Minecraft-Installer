@@ -2233,6 +2233,9 @@ def menu_delayed_action_game(game, action):
 	while True:
 		still_running = False
 		minutes_left = 55 - ((round(time.time()) - start) // 60)
+		player_msg = msg
+		if '{time}' in player_msg:
+			player_msg = player_msg.replace('{time}', str(minutes_left))
 
 		for service in services:
 			if service.is_running():
@@ -2248,8 +2251,6 @@ def menu_delayed_action_game(game, action):
 					service.stop()
 				else:
 					# Still online, check to see if we should send a message
-					if '{time}' in msg:
-						msg = msg.replace('{time}', str(minutes_left))
 
 					if minutes_left <= 5:
 						# Once the timer hits 5 minutes left, drop to the standard stop procedure.
@@ -2257,7 +2258,7 @@ def menu_delayed_action_game(game, action):
 
 					if minutes_left % 5 == 0 and minutes_left > 5:
 						# Send the warning every 5 minutes
-						service.send_message(msg)
+						service.send_message(player_msg)
 
 		if minutes_left % 5 == 0 and minutes_left > 5:
 			print('%s minutes remaining before %s.' % (str(minutes_left), action))
@@ -2826,9 +2827,11 @@ class GameApp(BaseApp):
 
 		:return:
 		"""
-		files = ['banned-ips.json', 'banned-players.json', 'ops.json', 'whitelist.json']
+		files = ['banned-ips.json', 'banned-players.json', 'ops.json', 'whitelist.json', 'plugins']
 		for service in self.get_services():
 			files.append(service.get_name())
+			files.append(service.get_name() + '_nether')
+			files.append(service.get_name() + '_the_end')
 		return files
 
 	def get_save_directory(self) -> Union[str, None]:

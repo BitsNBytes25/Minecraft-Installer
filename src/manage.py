@@ -123,9 +123,11 @@ class GameApp(BaseApp):
 
 		:return:
 		"""
-		files = ['banned-ips.json', 'banned-players.json', 'ops.json', 'whitelist.json']
+		files = ['banned-ips.json', 'banned-players.json', 'ops.json', 'whitelist.json', 'plugins']
 		for service in self.get_services():
 			files.append(service.get_name())
+			files.append(service.get_name() + '_nether')
+			files.append(service.get_name() + '_the_end')
 		return files
 
 	def get_save_directory(self) -> Union[str, None]:

@@ -58,6 +58,7 @@ GAME_SERVICE="minecraft-server"
 # scriptlet:bz_eval_tui/print_header.sh
 # scriptlet:ufw/install.sh
 # scriptlet:warlock/install_warlock_manager.sh
+# scriptlet:openjdk/install.sh
 
 print_header "$GAME_DESC *unofficial* Installer ${INSTALLER_VERSION}"
 
@@ -87,9 +88,17 @@ function install_application() {
 	fi
 
 	# Preliminary requirements
-	package_install curl sudo default-jdk python3-venv
+	package_install curl sudo python3-venv
 
-	java -version
+	# Minecraft Version | Java Version
+	# 1.7.10 - 1.11.2   | Java 8
+	# 1.12.0 - 1.16.5   | Java 11
+	# 1.17 - 1.20.4     | Java 17
+	# 1.20.5 +          | Java 21
+
+	JAVA_PATH="$(install_openjdk 21)"
+
+	$JAVA_PATH/bin/java -version
 
 	if [ "$FIREWALL" == "1" ]; then
 		if [ "$(get_enabled_firewall)" == "none" ]; then

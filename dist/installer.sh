@@ -1192,6 +1192,60 @@ EOF
 }
 
 
+##
+# Install OpenJDK from Eclipse Adoptium
+#
+# https://github.com/adoptium
+#
+# @arg $1 string OpenJDK version to install
+#
+# Will print the directory where OpenJDK was installed.
+#
+# CHANGELOG:
+#   2026.01.13 - Initial version
+#
+function install_openjdk() {
+	local VERSION="${1:-25}"
+
+	# Validate version input
+	if ! echo "$VERSION" | grep -E -q '^(8|11|16|17|18|19|20|21|22|23|24|25|26|27)$'; then
+		echo "install_openjdk: Invalid OpenJDK version specified: $VERSION" >&2
+		echo "Supported versions are: 8, 11, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27" >&2
+		return 1
+	fi
+
+	if ! cmd_exists curl; then
+		package_install curl
+	fi
+
+	# We will use this directory as a working directory for source files that need downloaded.
+	[ -d /opt/script-collection ] || mkdir -p /opt/script-collection
+
+	local DOWNLOAD_URL="$(curl https://api.github.com/repos/adoptium/temurin${VERSION}-binaries/releases/latest \
+	  | grep browser_download_url \
+	  | grep jre_x64_linux \
+	  | grep 'tar\.gz"' \
+	  | cut -d : -f 2,3 \
+	  | tr -d \"\
+	  | sed 's:\s*::')"
+
+	local JDK_TGZ="$(basename "$DOWNLOAD_URL")"
+
+	if ! download "$DOWNLOAD_URL" "/opt/script-collection/$JDK_TGZ" --no-overwrite; then
+		echo "install_openjdk: Cannot download OpenJDK from ${DOWNLOAD_URL}!" >&2
+		return 1
+	fi
+
+	local JDK_DIR="$(tar -zf "/opt/script-collection/$JDK_TGZ" --list | head -1)"
+
+	if [ ! -e "/opt/script-collection/$JDK_DIR" ]; then
+		tar -x -C /opt/script-collection/ -f "/opt/script-collection/$JDK_TGZ"
+	fi
+
+	echo "/opt/script-collection/$JDK_TGZ"
+}
+
+
 print_header "$GAME_DESC *unofficial* Installer ${INSTALLER_VERSION}"
 
 ############################################
@@ -1220,9 +1274,17 @@ function install_application() {
 	fi
 
 	# Preliminary requirements
-	package_install curl sudo default-jdk python3-venv
+	package_install curl sudo python3-venv
 
-	java -version
+	# Minecraft Version | Java Version
+	# 1.7.10 - 1.11.2   | Java 8
+	# 1.12.0 - 1.16.5   | Java 11
+	# 1.17 - 1.20.4     | Java 17
+	# 1.20.5 +          | Java 21
+
+	JAVA_PATH="$(install_openjdk 21)"
+
+	$JAVA_PATH/bin/java -version
 
 	if [ "$FIREWALL" == "1" ]; then
 		if [ "$(get_enabled_firewall)" == "none" ]; then
@@ -1271,7 +1333,7 @@ User=$GAME_USER
 Group=$GAME_USER
 WorkingDirectory=$GAME_DIR/AppFiles
 Environment=XDG_RUNTIME_DIR=/run/user/$(id -u $GAME_USER)
-ExecStart=/usr/bin/java -Xmx1G -Xms1G -jar minecraft_server.jar nogui
+ExecStart=$JAVA_PATH/bin/java -Xmx1G -Xms1G -jar minecraft_server.jar nogui
 ExecStop=$GAME_DIR/manage.py --pre-stop --service ${GAME_SERVICE}
 ExecStartPost=$GAME_DIR/manage.py --post-start --service ${GAME_SERVICE}
 Restart=on-failure
