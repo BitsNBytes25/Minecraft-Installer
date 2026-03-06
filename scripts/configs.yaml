@@ -420,3 +420,14 @@ manager:
     key: webhook
     type: str
     help: "The webhook URL for sending server status updates to a Discord channel."
+service:
+  - name: Service Java Path
+    key: java-path
+    type: str
+    default: /usr/bin/java
+    help: "The path to the Java executable used to run the Minecraft server."
+  - name: Service Game Version
+    key: game-version
+    type: str
+    default: latest
+    help: "The version of Minecraft to run on the server."
