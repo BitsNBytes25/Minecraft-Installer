@@ -1183,6 +1183,17 @@ manager:
     key: webhook
     type: str
     help: "The webhook URL for sending server status updates to a Discord channel."
+service:
+  - name: Service Java Path
+    key: java-path
+    type: str
+    default: /usr/bin/java
+    help: "The path to the Java executable used to run the Minecraft server."
+  - name: Service Game Version
+    key: game-version
+    type: str
+    default: latest
+    help: "The version of Minecraft to run on the server."
 EOF
 	chown $GAME_USER:$GAME_USER "$GAME_DIR/configs.yaml"
 
@@ -1258,6 +1269,23 @@ print_header "$GAME_DESC *unofficial* Installer ${INSTALLER_VERSION}"
 ############################################
 
 ##
+# Perform any steps necessary for upgrading an existing installation.
+#
+function upgrade_application() {
+	print_header "Existing installation detected, performing upgrade"
+
+	if [ -e "$GAME_DIR/AppFiles/eula.txt" ]; then
+		print_header('Upgrading to multi-instance support')
+		sudo -u $GAME_USER mkdir -p "$GAME_DIR/AppFiles/minecraft-server"
+		sudo -u $GAME_USER mv $GAME_DIR/AppFiles/* $GAME_DIR/AppFiles/minecraft-server/
+		mkdir $GAME_DIR/Environments
+		egrep '^Environment' /etc/systemd/system/minecraft-server.service | sed 's:^Environment=::g' > $GAME_DIR/Environments/minecraft-server.env
+		chown -R $GAME_USER:$GAME_USER "$GAME_DIR/Environments"
+		sed -i "s:WorkingDirectory=.*:WorkingDirectory=$GAME_DIR/AppFiles/minecraft-server:" /etc/systemd/system/minecraft-server.service
+	fi
+}
+
+##
 # Install the VEIN game server using Steam
 #
 # Expects the following variables:
@@ -1278,18 +1306,26 @@ function install_application() {
 		useradd -m -U $GAME_USER
 	fi
 
+	if [ ! -d "/home/${GAME_USER}" ]; then
+		mkdir -p "/home/${GAME_USER}"
+		chown $GAME_USER:$GAME_USER "/home/${GAME_USER}"
+	fi
+
 	# Preliminary requirements
 	package_install curl sudo python3-venv
 
+	# Install the various versions of Java required by Minecraft.
+	# required because the user may change the version of Minecraft they want to run.
 	# Minecraft Version | Java Version
 	# 1.7.10 - 1.11.2   | Java 8
 	# 1.12.0 - 1.16.5   | Java 11
 	# 1.17 - 1.20.4     | Java 17
 	# 1.20.5 +          | Java 21
 
-	JAVA_PATH="$(install_openjdk 21)"
-
-	$JAVA_PATH/bin/java -version
+	install_openjdk 8
+	install_openjdk 11
+	install_openjdk 17
+	install_openjdk 21
 
 	if [ "$FIREWALL" == "1" ]; then
 		if [ "$(get_enabled_firewall)" == "none" ]; then
@@ -1299,14 +1335,13 @@ function install_application() {
 	fi
 
 	[ -e "$GAME_DIR/AppFiles" ] || sudo -u $GAME_USER mkdir -p "$GAME_DIR/AppFiles"
+	[ -e "$GAME_DIR/Environments" ] || sudo -u $GAME_USER mkdir -p "$GAME_DIR/Environments"
 
 	# EULA Agreement, (because Microsoft is fun like that)
 	if ! prompt_yn -q --default-yes "By continuing you agree to the Minecraft EULA located at https://aka.ms/MinecraftEULA"; then
 		echo "You must agree to the EULA to continue, exiting." >&2
 		exit 1
 	fi
-	echo "eula=true" > "$GAME_DIR/AppFiles/eula.txt"
-	chown $GAME_USER:$GAME_USER "$GAME_DIR/AppFiles/eula.txt"
 
 	# Install the management script
 	install_warlock_manager "$REPO" "$BRANCH"
@@ -1315,38 +1350,6 @@ function install_application() {
 	download "https://raw.githubusercontent.com/${REPO}/refs/heads/${BRANCH}/dist/installer.sh" "$GAME_DIR/installer.sh"
 	chmod +x "$GAME_DIR/installer.sh"
 	chown $GAME_USER:$GAME_USER "$GAME_DIR/installer.sh"
-
-	# Use the management script to install the game server
-	if ! $GAME_DIR/manage.py update; then
-		echo "Could not install $GAME_DESC, exiting" >&2
-		exit 1
-	fi
-
-	# Install system service file to be loaded by systemd
-    cat > /etc/systemd/system/${GAME_SERVICE}.service <<EOF
-[Unit]
-# DYNAMICALLY GENERATED FILE! Edit at your own risk
-Description=$GAME_DESC
-After=network.target
-
-[Service]
-Type=simple
-LimitNOFILE=10000
-User=$GAME_USER
-Group=$GAME_USER
-WorkingDirectory=$GAME_DIR/AppFiles
-Environment=XDG_RUNTIME_DIR=/run/user/$(id -u $GAME_USER)
-ExecStart=$JAVA_PATH/bin/java -Xmx1G -Xms1G -jar minecraft_server.jar nogui
-ExecStop=$GAME_DIR/manage.py pre-stop --service ${GAME_SERVICE}
-ExecStartPost=$GAME_DIR/manage.py post-start --service ${GAME_SERVICE}
-Restart=on-failure
-RestartSec=1800s
-TimeoutStartSec=600s
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    systemctl daemon-reload
 
 	if [ -n "$WARLOCK_GUID" ]; then
 		# Register Warlock
@@ -1434,7 +1437,7 @@ else
 	echo "Using default installation directory of ${GAME_DIR}"
 fi
 
-if [ -e "/etc/systemd/system/${GAME_SERVICE}.service" ]; then
+if [ -e "$GAME_DIR/AppFiles" ]; then
 	EXISTING=1
 else
 	EXISTING=0
@@ -1453,6 +1456,10 @@ if [ "$MODE" == "install" ]; then
 		FIREWALL=1
 	else
 		FIREWALL=0
+	fi
+
+	if [ $EXISTING -eq 1 ]; then
+		upgrade_application
 	fi
 
 	install_application

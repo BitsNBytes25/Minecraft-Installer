@@ -20,18 +20,20 @@ sys.path.insert(
 		'python' + '.'.join(sys.version.split('.')[:2]), 'site-packages'
 	)
 )
-from warlock_manager.apps.base_app import BaseApp
+from warlock_manager.apps.manual_app import ManualApp
 from warlock_manager.config.ini_config import INIConfig
 from warlock_manager.config.properties_config import PropertiesConfig
 from warlock_manager.libs.app_runner import app_runner
 from warlock_manager.libs.firewall import Firewall
+from warlock_manager.libs.java import find_java_version
 from warlock_manager.libs.tui import print_header
 from warlock_manager.services.rcon_service import RCONService
+from warlock_manager.libs.version import is_version_older, is_version_compatible
 
 here = os.path.dirname(os.path.realpath(__file__))
 
 
-class GameApp(BaseApp):
+class GameApp(ManualApp):
 	"""
 	Game application manager
 	"""
@@ -40,10 +42,12 @@ class GameApp(BaseApp):
 		super().__init__()
 
 		self.name = 'Minecraft'
+		self.service_prefix = 'minecraft-'
 		self.desc = 'Minecraft Java Edition'
-		self.services = ('minecraft-server',)
-		self._svcs = None
+		self.services = self.detect_services()
 		self.service_handler = GameService
+		self.multi_binary = True
+		self._latest_version = None
 
 		self.configs = {
 			'manager': INIConfig('manager', os.path.join(here, '.settings.ini'))
@@ -56,19 +60,10 @@ class GameApp(BaseApp):
 
 		:return:
 		"""
-		if os.path.exists(os.path.join(here, '.version')):
-			with open(os.path.join(here, '.version'), 'r') as f:
-				current_version = f.read().strip()
-			try:
-				with request.urlopen('https://net-secondary.web.minecraft-services.net/api/v1.0/download/latest') as resp:
-					dat = json.loads(resp.read().decode('utf-8'))
-					return 'result' in dat and dat['result'] != current_version
-			except urllib_error.HTTPError:
-				return False
-			except urllib_error.URLError:
-				return False
-		else:
-			return True
+		for svc in self.get_services():
+			if svc.check_update_available():
+				return True
+		return False
 
 	def update(self):
 		"""
@@ -76,54 +71,9 @@ class GameApp(BaseApp):
 
 		:return:
 		"""
-		print_header('Updating Minecraft Server')
-
-		try:
-			latest_version = None
-			with request.urlopen('https://net-secondary.web.minecraft-services.net/api/v1.0/download/latest') as resp:
-				dat = json.loads(resp.read().decode('utf-8'))
-				if 'result' in dat:
-					latest_version = dat['result']
-
-			if latest_version is None:
-				print('Failed to retrieve latest version information.', file=sys.stderr)
-				return False
-
-			download_url = None
-			with request.urlopen('https://net-secondary.web.minecraft-services.net/api/v1.0/download/links') as resp:
-				dat = json.loads(resp.read().decode('utf-8'))
-				if 'result' in dat and 'links' in dat['result']:
-					for link in dat['result']['links']:
-						if link['downloadType'] == 'serverJar':
-							download_url = link['downloadUrl']
-							break
-
-			if download_url is None:
-				print('Failed to retrieve download URL for latest version.', file=sys.stderr)
-				return False
-
-			print('Downloading Minecraft Server version %s...' % latest_version)
-			with request.urlopen(download_url) as download_resp:
-				with open(os.path.join(here, 'AppFiles/minecraft_server.jar'), 'wb') as out_file:
-					out_file.write(download_resp.read())
-			with open(os.path.join(here, '.version'), 'w') as f:
-				f.write(latest_version)
-			print('Update complete.')
-
-			if os.geteuid() == 0:
-				stat_info = os.stat(here)
-				uid = stat_info.st_uid
-				gid = stat_info.st_gid
-				os.chown(os.path.join(here, 'AppFiles/minecraft_server.jar'), uid, gid)
-				os.chown(os.path.join(here, '.version'), uid, gid)
-			return True
-
-		except urllib_error.HTTPError:
-			print('Failed to download the latest version (HTTP Error).', file=sys.stderr)
-			return False
-		except urllib_error.URLError:
-			print('Failed to download the latest version (URL Error).', file=sys.stderr)
-			return False
+		print_header('Updating all Minecraft Services')
+		for svc in self.get_services():
+			svc.update()
 
 	def get_save_files(self) -> list | None:
 		"""
@@ -159,19 +109,71 @@ class GameApp(BaseApp):
 			print('ERROR: Please run this script with sudo to perform first-run configuration.')
 			return False
 
-		svc = self.get_services()[0]
-
-		svc.option_ensure_set('Level Name')
-		svc.option_ensure_set('Server Port')
-		svc.option_ensure_set('RCON Port')
-		if not svc.option_has_value('RCON Password'):
-			# Generate a random password for RCON
-			random_password = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
-			svc.set_option('RCON Password', random_password)
-		if not svc.option_has_value('Enable RCON'):
-			svc.set_option('Enable RCON', True)
-
+		services = self.get_services()
+		if len(services) == 0:
+			# No services detected, create one.
+			self.create_service('server')
 		return True
+
+	def get_latest_version(self) -> str | None:
+		"""
+		Get the latest released version available for the game server
+
+		Pulls the data live from Mojang's version manifest, which is updated with every release.
+		:return:
+		"""
+		if self._latest_version is not None:
+			return self._latest_version
+
+		src_manifest = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json'
+		dat = self.download_json(src_manifest)
+		if 'latest' in dat and 'release' in dat['latest']:
+			self._latest_version = dat['latest']['release']
+			return self._latest_version
+
+		return None
+
+	def get_versions_available(self) -> list:
+		"""
+		Get a list of all released versions available for the game server
+
+		Pulls the data live from Mojang's version manifest, which is updated with every release.
+		:return:
+		"""
+		src_manifest = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json'
+		dat = self.download_json(src_manifest)
+		versions = ['latest']
+		for version in dat['versions']:
+			if version['type'] == 'release':
+				versions.append(version['id'])
+		return versions
+
+	def get_download_url(self, version: str) -> str | None:
+		"""
+		Get the download URL for the server for a specific version.
+
+		Pulls live data from the Mojang version manifest.
+		:return:
+		"""
+		src_manifest = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json'
+		meta_url = None
+		dat = self.download_json(src_manifest)
+		for version in dat['versions']:
+			if version['id'] == version:
+				meta_url = version['url']
+				break
+
+		if meta_url is None:
+			print('Version %s not found in version manifest.' % version, file=sys.stderr)
+			return None
+
+		# Now that the meta_url for the package is ready, grab that which will contain the download URL for the server
+		dat = self.download_json(meta_url)
+		if 'downloads' in dat and 'server' in dat['downloads'] and 'url' in dat['downloads']['server']:
+			return dat['downloads']['server']['url']
+
+		print('Version %s did not appear to have a server download URL.' % version, file=sys.stderr)
+		return None
 
 
 class GameService(RCONService):
@@ -187,7 +189,8 @@ class GameService(RCONService):
 		self.service = service
 		self.game = game
 		self.configs = {
-			'server': PropertiesConfig('server', os.path.join(here, 'AppFiles/server.properties'))
+			'server': PropertiesConfig('server', os.path.join(self.get_app_directory(), 'server.properties')),
+			'service': INIConfig('service', os.path.join(self.get_app_directory(), '.service.ini'))
 		}
 		self.load()
 
@@ -211,6 +214,18 @@ class GameService(RCONService):
 			if previous_value:
 				Firewall.remove(int(previous_value), 'udp')
 			Firewall.allow(int(new_value), 'udp', 'Allow %s query port' % self.game.desc)
+		elif option == 'Service Game Version':
+			# If the game version is updated, we should also update the server to match that version
+			# and change the Java runtime to match the appropriate version for that game version.
+			try:
+				self.assign_java_path()
+			except OSError as e:
+				print('WARNING: Failed to find Java installation for game version %s: %s' % (new_value, str(e)), file=sys.stderr)
+			self.update()
+		elif option == 'Service Java Path':
+			# If the Java path is updated, generate a new systemd service file.
+			self.build_systemd_config()
+			self.reload()
 
 	def is_api_enabled(self) -> bool:
 		"""
@@ -326,6 +341,108 @@ class GameService(RCONService):
 			commands.append('/' + cmd)
 
 		return commands
+
+	def get_executable(self) -> str:
+		"""
+		Get the full executable for this game service
+		:return:
+		"""
+		return '%s -Xmx1G -Xms1G -jar minecraft_server.jar nogui' % self.get_option_value('Service Java Path')
+
+	def get_target_version(self) -> str:
+		"""
+		Get the target version of the game server
+
+		This is the version of the game server that _should_ be installed (or will be installed).
+		:return:
+		"""
+		target_version = self.get_option_value('Service Game Version')
+		if target_version == 'latest':
+			target_version = self.game.get_latest_version()
+
+		return target_version
+
+	def assign_java_path(self):
+		"""
+		Assign the appropriate Java version for the currently selected game version and set the Java path option accordingly.
+		:return:
+		"""
+		target_version = self.get_target_version()
+
+		if is_version_older(target_version, '1.12.0'):
+			java_version = 8
+		elif is_version_compatible(target_version, '1.12.0', '1.16.5'):
+			java_version = 11
+		elif is_version_compatible(target_version, '1.17.0', '1.20.4'):
+			java_version = 17
+		else:
+			java_version = 21
+
+		java_path = find_java_version(java_version)
+		self.set_option('Service Java Path', java_path)
+
+	def create_service(self):
+		super().create_service()
+
+		# User accepted the EULA during installation, so forward that for this service
+		eula = os.path.join(self.get_app_directory(), 'eula.txt')
+		with open(eula, 'w') as f:
+			f.write('eula=true\n')
+		self.game.ensure_file_ownership(eula)
+
+		# @todo Swap LevelName with service name so it's better than just "world" for every service
+		self.option_ensure_set('Level Name')
+		self.option_ensure_set('Server Port')
+		self.option_ensure_set('RCON Port')
+		if not self.option_has_value('RCON Password'):
+			# Generate a random password for RCON
+			random_password = ''.join(random.choices(string.ascii_letters + string.digits, k=32))
+			self.set_option('RCON Password', random_password)
+		if not self.option_has_value('Enable RCON'):
+			self.set_option('Enable RCON', True)
+
+	def check_update_available(self) -> bool:
+		"""
+		Check if an update is available for this game
+
+		:return:
+		"""
+		version_file = os.path.join(self.get_app_directory(), '.version')
+		target_version = self.get_target_version()
+
+		if os.path.exists(version_file):
+			with open(version_file, 'r') as f:
+				current_version = f.read().strip()
+
+			return current_version != target_version
+		else:
+			return True
+
+	def update(self):
+		"""
+		Update the game server to the latest version
+
+		:return:
+		"""
+		print_header('Updating Minecraft Server')
+
+		version_file = os.path.join(self.get_app_directory(), '.version')
+		target_version = self.get_target_version()
+		download_url = self.game.get_download_url(target_version)
+
+		if download_url is None:
+			print('Failed to retrieve download URL for latest version.', file=sys.stderr)
+			return False
+
+		print('Downloading Minecraft Server version %s...' % target_version)
+		self.game.download_file(download_url, os.path.join(self.get_app_directory(), 'minecraft_server.jar'))
+
+		with open(version_file, 'w') as f:
+			f.write(target_version)
+		self.game.ensure_file_ownership(version_file)
+		print('Update complete.')
+		return True
+
 
 if __name__ == '__main__':
 	app = app_runner(GameApp())
