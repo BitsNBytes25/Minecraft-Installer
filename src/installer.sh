@@ -73,7 +73,7 @@ function upgrade_application() {
 	print_header "Existing installation detected, performing upgrade"
 
 	if [ -e "$GAME_DIR/AppFiles/eula.txt" ]; then
-		print_header('Upgrading to multi-instance support')
+		print_header 'Upgrading to multi-instance support'
 		sudo -u $GAME_USER mkdir -p "$GAME_DIR/AppFiles/minecraft-server"
 		sudo -u $GAME_USER mv $GAME_DIR/AppFiles/* $GAME_DIR/AppFiles/minecraft-server/
 		mkdir $GAME_DIR/Environments
