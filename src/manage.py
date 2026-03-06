@@ -378,8 +378,10 @@ class GameService(RCONService):
 			f.write('eula=true\n')
 		self.game.ensure_file_ownership(eula)
 
-		# @todo Swap LevelName with service name so it's better than just "world" for every service
-		self.option_ensure_set('Level Name')
+		if not self.option_has_value('Level Name'):
+			# Trim the prefix off the service name to get the default level name
+			level_name = self.service[len(self.game.service_prefix):] if self.game.service_prefix != '' else self.service
+			self.set_option('Level Name', level_name)
 		self.option_ensure_set('Server Port')
 		self.option_ensure_set('RCON Port')
 		if not self.option_has_value('RCON Password'):
