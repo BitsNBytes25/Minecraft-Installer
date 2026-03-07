@@ -10,7 +10,7 @@ from warlock_manager.config.ini_config import INIConfig
 from warlock_manager.config.properties_config import PropertiesConfig
 from warlock_manager.libs.app_runner import app_runner
 from warlock_manager.libs.firewall import Firewall
-from warlock_manager.libs.java import find_java_version
+from warlock_manager.libs.java import find_java_version, get_java_paths
 from warlock_manager.libs.tui import print_header
 from warlock_manager.services.rcon_service import RCONService
 from warlock_manager.libs.version import is_version_older, is_version_compatible
@@ -211,6 +211,19 @@ class GameService(RCONService):
 			# If the Java path is updated, generate a new systemd service file.
 			self.build_systemd_config()
 			self.reload()
+
+	def get_option_options(self, option: str):
+		"""
+		Get a list of options for a specific configuration option, if applicable
+		:param option:
+		:return:
+		"""
+		if option == 'Service Game Version':
+			return self.game.get_versions_available()
+		elif option == 'Service Java Path':
+			return get_java_paths()
+		else:
+			return super().get_option_options(option)
 
 	def is_api_enabled(self) -> bool:
 		"""

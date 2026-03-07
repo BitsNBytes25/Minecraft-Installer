@@ -1220,6 +1220,8 @@ EOF
 # Will print the directory where OpenJDK was installed.
 #
 # CHANGELOG:
+#   2026.03.05 - Add support for update-alternatives / alternatives.
+#   2026.03.03 - Bugfix, return the correct JDK directory.
 #   2026.01.13 - Initial version
 #
 function install_openjdk() {
@@ -1255,9 +1257,19 @@ function install_openjdk() {
 	fi
 
 	local JDK_DIR="$(tar -zf "/opt/script-collection/$JDK_TGZ" --list | head -1)"
+	JDK_DIR="${JDK_DIR%/}"
 
 	if [ ! -e "/opt/script-collection/$JDK_DIR" ]; then
 		tar -x -C /opt/script-collection/ -f "/opt/script-collection/$JDK_TGZ"
+	fi
+
+	# Update distro registrations for alternative software.
+	if os_like debian; then
+		update-alternatives --install "/usr/bin/java" "java" "/opt/script-collection/$JDK_DIR/bin/java" 1
+	elif os_like rhel; then
+		alternatives --install "/usr/bin/java" "java" "/opt/script-collection/$JDK_DIR/bin/java" 1
+	elif os_like suse; then
+		update-alternatives --install "/usr/bin/java" "java" "/opt/script-collection/$JDK_DIR/bin/java" 1
 	fi
 
 	echo "/opt/script-collection/$JDK_DIR"
