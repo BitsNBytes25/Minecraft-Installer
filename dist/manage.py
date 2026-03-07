@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 import sys
 import os
-import json
 import random
 import string
-from urllib import request
-import urllib.error as urllib_error
 # Include the virtual environment site-packages in sys.path
 here = os.path.dirname(os.path.realpath(__file__))
 if not os.path.exists(os.path.join(here, '.venv')):
@@ -402,6 +399,9 @@ class GameService(RCONService):
 			self.set_option('RCON Password', random_password)
 		if not self.option_has_value('Enable RCON'):
 			self.set_option('Enable RCON', True)
+
+		# Set the correct version of Java for the default game version
+		self.assign_java_path()
 
 	def check_update_available(self) -> bool:
 		"""

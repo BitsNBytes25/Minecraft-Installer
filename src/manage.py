@@ -1,11 +1,8 @@
 #!/usr/bin/env python3
 import sys
 import os
-import json
 import random
 import string
-from urllib import request
-import urllib.error as urllib_error
 
 # import:org_python/venv_path_include.py
 from warlock_manager.apps.manual_app import ManualApp
@@ -390,6 +387,9 @@ class GameService(RCONService):
 			self.set_option('RCON Password', random_password)
 		if not self.option_has_value('Enable RCON'):
 			self.set_option('Enable RCON', True)
+
+		# Set the correct version of Java for the default game version
+		self.assign_java_path()
 
 	def check_update_available(self) -> bool:
 		"""

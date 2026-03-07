@@ -1189,11 +1189,13 @@ service:
     type: str
     default: /usr/bin/java
     help: "The path to the Java executable used to run the Minecraft server."
+    group: Settings
   - name: Service Game Version
     key: game-version
     type: str
     default: latest
     help: "The version of Minecraft to run on the server."
+    group: Settings
 EOF
 	chown $GAME_USER:$GAME_USER "$GAME_DIR/configs.yaml"
 
