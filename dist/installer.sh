@@ -767,26 +767,31 @@ server:
     type: bool
     default: false
     help: "Whether to accept incoming transfers via a transfer packet."
+    group: Advanced
   - name: Allow Flight
     key: allow-flight
     type: bool
     default: false
     help: "Whether to allow players to fly."
+    group: Basic
   - name: Broadcast Console to Ops
     key: broadcast-console-to-ops
     type: bool
     default: true
     help: "Whether to broadcast console messages to operators."
+    group: Management
   - name: Broadcast RCON to Ops
     key: broadcast-rcon-to-ops
     type: bool
     default: true
     help: "Whether to broadcast RCON messages to operators."
+    group: Management
   - name: Bug Report Link
     key: bug-report-link
     type: str
     default: ""
     help: "A link to your bug reporting platform, shown when players use the /bugreport command."
+    group: Management
   - name: Difficulty
     key: difficulty
     type: str
@@ -797,61 +802,73 @@ server:
       - normal
       - hard
     help: "Sets the game difficulty."
+    group: Basic
   - name: Enable Code of Conduct
     key: enable-code-of-conduct
     type: bool
     default: false
     help: "Whether to enable the code of conduct enforcement."
+    group: Security
   - name: Enable JMX Monitoring
     key: enable-jmx-monitoring
     type: bool
     default: false
     help: "Whether to enable JMX monitoring for the server."
+    group: Advanced
   - name: Enable Query
     key: enable-query
     type: bool
     default: false
     help: "Whether to enable the query protocol."
+    group: Network
   - name: Enable RCON
     key: enable-rcon
     type: bool
     default: false
     help: "Whether to enable RCON (Remote Console) for server management."
+    group: Management
   - name: Enable Status
     key: enable-status
     type: bool
     default: true
     help: "Whether to enable the server status query."
+    group: Network
   - name: Enable Secure Profile
     key: enable-secure-profile
     type: bool
     default: true
     help: "Whether to enable secure profile handling."
+    group: Security
   - name: Enable Whitelist
     key: enable-whitelist
     type: bool
     default: false
     help: "Whether to enable the server whitelist."
+    group: Basic
   - name: Enforce Whitelist on Login
     key: enforce-whitelist-on-login
     type: bool
     default: false
     help: "Whether to enforce the whitelist when players log in."
+    group: Security
   - name: Entity Broadcast Range Percentage
     key: entity-broadcast-range-percentage
     type: int
     default: 100
     help: "Sets the percentage of the entity broadcast range."
+    group: Advanced
   - name: Force Gamemode
     key: force-gamemode
     type: bool
     default: false
     help: "Whether to force players into the default gamemode upon joining."
+    group: Basic
   - name: Function Permission Level
     key: function-permission-level
     type: int
     default: 2
     help: "Sets the permission level required to use server functions."
+    group: Management
   - name: Gamemode
     key: gamemode
     type: str
@@ -862,46 +879,55 @@ server:
       - adventure
       - spectator
     help: "Sets the default gamemode for players."
+    group: Basic
   - name: Generate Structures
     key: generate-structures
     type: bool
     default: true
     help: "Whether to generate structures like villages and temples."
+    group: World
   - name: Generator Settings
     key: generator-settings
     type: str
     default: "{}"
     help: "Custom settings for world generation."
+    group: World
   - name: Hardcore
     key: hardcore
     type: bool
     default: false
     help: "Whether to enable hardcore mode."
+    group: Basic
   - name: Hide Online Players
     key: hide-online-players
     type: bool
     default: false
     help: "Whether to hide the number of online players from the server list."
+    group: Security
   - name: Initial Disabled Packs
     key: initial-disabled-packs
     type: str
     default: ""
     help: "A comma-separated list of data packs to be disabled when the world is created."
+    group: World
   - name: Initial Enabled Packs
     key: initial-enabled-packs
     type: str
     default: "vanilla"
     help: "A comma-separated list of data packs to be enabled when the world is created."
+    group: World
   - name: Level Name
     key: level-name
     type: str
     default: world
     help: "The name of the world folder."
+    group: Basic
   - name: Level Seed
     key: level-seed
     type: str
     default: ""
     help: "The seed used to generate the world."
+    group: Basic
   - name: Level Type
     key: level-type
     type: str
@@ -913,121 +939,145 @@ server:
       - minecraft:amplified
       - minecraft:single_biome_surface
     help: "The type of world to generate."
+    group: World
   - name: Log IPs
     key: log-ips
     type: bool
     default: true
     help: "Whether to log player IP addresses."
+    group: Security
   - name: Management Server Enabled
     key: management-server-enabled
     type: bool
     default: false
     help: "Whether to enable the management server for remote administration."
+    group: Management
   - name: Management Server Host
     key: management-server-host
     type: str
     default: "localhost"
     help: "The host address for the management server."
+    group: Management
   - name: Management Server Port
     key: management-server-port
     type: int
     default: 0
     help: "The port number for the management server."
+    group: Management
   - name: Management Server Secret
     key: management-server-secret
     type: str
     default: ""
     help: "The secret key for authenticating with the management server."
+    group: Security
   - name: Management Server TLS Enabled
     key: management-server-tls-enabled
     type: bool
     default: true
     help: "Whether to enable TLS for the management server."
+    group: Security
   - name: Management Server TLS Keystore
     key: management-server-tls-keystore
     type: str
     default: ""
     help: "The keystore file for TLS on the management server."
+    group: Security
   - name: Management Server TLS Keystore Password
     key: management-server-tls-keystore-password
     type: str
     default: ""
     help: "The password for the TLS keystore on the management server."
+    group: Security
   - name: Max Chained Neighbor Updates
     key: max-chained-neighbor-updates
     type: int
     default: 1000000
     help: "The maximum number of block updates that can be chained together."
+    group: Advanced
   - name: Max Players
     key: max-players
     type: int
     default: 20
     help: "The maximum number of players allowed on the server."
+    group: Basic
   - name: Max Tick Time
     key: max-tick-time
     type: int
     default: 60000
     help: "The maximum time (in milliseconds) a single tick can take before the server is considered frozen."
+    group: Advanced
   - name: Max World Size
     key: max-world-size
     type: int
     default: 29999984
     help: "The maximum size of the world in blocks."
+    group: World
   - name: MOTD
     key: motd
     type: str
     default: A Minecraft Server
     help: "The message of the day displayed in the server list."
+    group: Basic
   - name: Network Compression Threshold
     key: network-compression-threshold
     type: int
     default: 256
     help: "The threshold (in bytes) for network compression."
+    group: Network
   - name: Online Mode
     key: online-mode
     type: bool
     default: true
     help: "Whether to enable online mode (authentication with Mojang servers)."
+    group: Security
   - name: Op Permission Level
     key: op-permission-level
     type: int
     default: 4
     help: "Sets the permission level for server operators."
+    group: Management
   - name: Pause When Empty Seconds
     key: pause-when-empty-seconds
     type: int
     default: 60
     help: "The number of seconds to wait before pausing the server when no players are online."
+    group: Advanced
   - name: Player Idle Timeout
     key: player-idle-timeout
     type: int
     default: 0
     help: "The time (in minutes) before an idle player is kicked from the server. 0 disables this feature."
+    group: Basic
   - name: Prevent Proxy Connections
     key: prevent-proxy-connections
     type: bool
     default: false
     help: "Whether to prevent connections from known proxy servers."
+    group: Security
   - name: Query Port
     key: query.port
     type: int
     default: 25565
     help: "The port number for the query protocol."
+    group: Network
   - name: Rate Limit
     key: rate-limit
     type: int
     default: 0
     help: "The maximum number of packets per second a player can send. 0 disables rate limiting."
+    group: Network
   - name: RCON Password
     key: rcon.password
     type: str
     default: ""
     help: "The password for RCON access."
+    group: Management
   - name: RCON Port
     key: rcon.port
     type: int
     default: 25575
     help: "The port number for RCON access."
+    group: Management
   - name: Region File Compression
     key: region-file-compression
     type: str
@@ -1037,86 +1087,103 @@ server:
       - zlib
       - deflate
     help: "The algorithm used for compressing chunks in regions."
+    group: Advanced
   - name: Require Resource Pack
     key: require-resource-pack
     type: bool
     default: false
     help: "Whether to require players to use the server's resource pack."
+    group: Resource Pack
   - name: Resource Pack
     key: resource-pack
     type: str
     default: ""
     help: "The URL of the resource pack to be used by players."
+    group: Resource Pack
   - name: Resource Pack ID
     key: resource-pack-id
     type: str
     default: ""
     help: "An optional UUID for the resource pack set by resource-pack to identify the pack with clients. "
+    group: Resource Pack
   - name: Resource Pack Prompt
     key: resource-pack-prompt
     type: str
     default: ""
     help: "The message shown to players when asking them to accept the resource pack."
+    group: Resource Pack
   - name: Resource Pack SHA1
     key: resource-pack-sha1
     type: str
     default: ""
     help: "The SHA-1 hash of the resource pack file for integrity verification."
+    group: Resource Pack
   - name: Server IP
     key: server-ip
     type: str
     default: ""
     help: "The IP address the server listens on."
+    group: Network
   - name: Server Port
     key: server-port
     type: int
     default: 25565
     help: "The port number the server listens on."
+    group: Basic
   - name: Simulation Distance
     key: simulation-distance
     type: int
     default: 10
     help: "The distance (in chunks) that the server simulates around each player."
+    group: World
   - name: Spawn Protection
     key: spawn-protection
     type: int
     default: 16
     help: "The radius (in blocks) around the world spawn point that is protected from player modifications."
+    group: World
   - name: Status Heartbeat Interval
     key: status-heartbeat-interval
     type: int
     default: 5
     help: "The interval (in seconds) between status heartbeats."
+    group: Advanced
   - name: Sync Chunk Writes
     key: sync-chunk-writes
     type: bool
     default: true
     help: "Whether to synchronize chunk writes to disk."
+    group: Advanced
   - name: Text Filtering Config
     key: text-filtering-config
     type: str
     default: ""
     help: "The configuration for text filtering."
+    group: Filtering
   - name: Text Filtering Version
     key: text-filtering-version
     type: int
     default: 0
     help: "The version of the text filtering configuration."
+    group: Filtering
   - name: Use Native Transport
     key: use-native-transport
     type: bool
     default: true
     help: "Whether to use native transport libraries for better performance."
+    group: Advanced
   - name: View Distance
     key: view-distance
     type: int
     default: 10
     help: "The distance (in chunks) that players can see."
+    group: Basic
   - name: Whitelist
     key: white-list
     type: bool
     default: false
     help: "Whether the whitelist is enabled."
+    group: Basic
 manager:
   - name: Shutdown Warning 5 Minutes
     section: Messages
