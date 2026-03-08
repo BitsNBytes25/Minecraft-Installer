@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import logging
 import sys
 import os
 import random
@@ -152,12 +153,14 @@ class GameApp(ManualApp):
 		Pulls live data from the Mojang version manifest.
 		:return:
 		"""
+		from pprint import pprint
+		logging.debug('Searching for download URL for version %s...' % version)
 		src_manifest = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json'
 		meta_url = None
 		dat = self.download_json(src_manifest)
-		for version in dat['versions']:
-			if version['id'] == version:
-				meta_url = version['url']
+		for version_dat in dat['versions']:
+			if version_dat['id'] == version:
+				meta_url = version_dat['url']
 				break
 
 		if meta_url is None:
@@ -165,6 +168,7 @@ class GameApp(ManualApp):
 			return None
 
 		# Now that the meta_url for the package is ready, grab that which will contain the download URL for the server
+		logging.debug('Retrieving version metadata from %s...' % meta_url)
 		dat = self.download_json(meta_url)
 		if 'downloads' in dat and 'server' in dat['downloads'] and 'url' in dat['downloads']['server']:
 			return dat['downloads']['server']['url']
@@ -388,6 +392,7 @@ class GameService(RCONService):
 		else:
 			java_version = 21
 
+		logging.debug('Assigning Java version %d for game version %s' % (java_version, target_version))
 		java_path = find_java_version(java_version)
 		self.set_option('Service Java Path', java_path)
 
@@ -439,8 +444,6 @@ class GameService(RCONService):
 
 		:return:
 		"""
-		print_header('Updating Minecraft Server')
-
 		version_file = os.path.join(self.get_app_directory(), '.version')
 		target_version = self.get_target_version()
 		download_url = self.game.get_download_url(target_version)
