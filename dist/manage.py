@@ -73,27 +73,6 @@ class GameApp(ManualApp):
 		for svc in self.get_services():
 			svc.update()
 
-	def get_save_files(self) -> list | None:
-		"""
-		Get a list of save files / directories for the game server
-
-		:return:
-		"""
-		files = ['banned-ips.json', 'banned-players.json', 'ops.json', 'whitelist.json', 'plugins']
-		for service in self.get_services():
-			files.append(service.get_name())
-			files.append(service.get_name() + '_nether')
-			files.append(service.get_name() + '_the_end')
-		return files
-
-	def get_save_directory(self) -> str | None:
-		"""
-		Get the save directory for the game server
-
-		:return:
-		"""
-		return os.path.join(here, 'AppFiles')
-
 	def first_run(self) -> bool:
 		"""
 		Perform first-run configuration for setting up the game server initially
@@ -460,6 +439,23 @@ class GameService(RCONService):
 		self.game.ensure_file_ownership(version_file)
 		print('Update complete.')
 		return True
+
+	def get_save_files(self) -> list | None:
+		"""
+		Get a list of save files / directories for the game server
+
+		:return:
+		"""
+		return [
+			'banned-ips.json',
+			'banned-players.json',
+			'ops.json',
+			'whitelist.json',
+			'plugins',
+			self.get_name(),
+			self.get_name() + '_nether',
+			self.get_name() + '_the_end'
+		]
 
 
 if __name__ == '__main__':
