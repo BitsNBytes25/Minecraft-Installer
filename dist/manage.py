@@ -42,7 +42,6 @@ class GameApp(ManualApp):
 		self.name = 'Minecraft'
 		self.service_prefix = 'minecraft-'
 		self.desc = 'Minecraft Java Edition'
-		self.services = self.detect_services()
 		self.service_handler = GameService
 		self.multi_binary = True
 		self._latest_version = None
@@ -399,6 +398,9 @@ class GameService(RCONService):
 
 		# Set the correct version of Java for the default game version
 		self.assign_java_path()
+
+		# Download the latest version of the game server
+		self.update()
 
 	def check_update_available(self) -> bool:
 		"""
