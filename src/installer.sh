@@ -45,7 +45,6 @@ REPO="BitsNBytes25/Minecraft-Installer"
 WARLOCK_GUID="700798f0-35be-bc6c-da84-62c510dfbd06"
 GAME_USER="minecraft"
 GAME_DIR="/home/${GAME_USER}"
-GAME_SERVICE="minecraft-server"
 
 # compile:usage
 # compile:argparse
@@ -91,7 +90,6 @@ function upgrade_application() {
 #   GAME_DIR     - Directory to install the game into
 #   STEAM_ID     - Steam App ID of the game
 #   GAME_DESC    - Description of the game (for logging purposes)
-#   GAME_SERVICE - Service name to install with Systemd
 #   SAVE_DIR     - Directory to store game save files
 #
 function install_application() {
@@ -168,17 +166,20 @@ function postinstall() {
 #
 # Expects the following variables:
 #   GAME_DIR     - Directory where the game is installed
-#   GAME_SERVICE - Service name used with Systemd
 #   SAVE_DIR     - Directory where game save files are stored
 #
 function uninstall_application() {
 	print_header "Performing uninstall_application"
 
-	systemctl disable $GAME_SERVICE
-	systemctl stop $GAME_SERVICE
+	for envfile in "$GAME_DIR/Environments/"*.env; do
+		SERVICE=$(basename "$envfile" .env)
+		# Service registration
+		systemctl disable $SERVICE
+		systemctl stop $SERVICE
+		# Service files
+		[ -e "/etc/systemd/system/${SERVICE}.service" ] && rm "/etc/systemd/system/${SERVICE}.service"
+	done
 
-	# Service files
-	[ -e "/etc/systemd/system/${GAME_SERVICE}.service" ] && rm "/etc/systemd/system/${GAME_SERVICE}.service"
 
 	# Game files
 	[ -d "$GAME_DIR" ] && rm -rf "$GAME_DIR/AppFiles"
@@ -206,10 +207,17 @@ else
 fi
 
 
-if systemctl -q is-active $GAME_SERVICE; then
-	echo "$GAME_DESC service is currently running, please stop it before running this installer."
-	echo "You can do this with: sudo systemctl stop $GAME_SERVICE"
-	exit 1
+if [ -e "$GAME_DIR/Environments" ]; then
+	# Check for existing service files to determine if the service is running.
+	# This is important to prevent conflicts with the installer trying to modify files while the service is running.
+	for envfile in "$GAME_DIR/Environments/"*.env; do
+		SERVICE=$(basename "$envfile" .env)
+		if systemctl -q is-active $SERVICE; then
+			echo "$GAME_DESC service is currently running, please stop all instances before running this installer."
+			echo "You can do this with: sudo systemctl stop $SERVICE"
+			exit 1
+		fi
+	done
 fi
 
 if [ -n "$OVERRIDE_DIR" ]; then
