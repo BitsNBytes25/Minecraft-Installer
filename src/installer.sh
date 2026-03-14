@@ -160,7 +160,7 @@ function postinstall() {
 	print_header "Performing postinstall"
 
 	# First run setup
-	$GAME_DIR/manage.py first-run
+	python3 -u $GAME_DIR/manage.py first-run
 }
 
 ##

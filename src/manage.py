@@ -77,6 +77,8 @@ class GameApp(ManualApp):
 			# No services detected, create one.
 			logging.info('No services detected, creating one...')
 			self.create_service('server')
+		else:
+			logging.info('Detected %d services, skipping first-run creation.' % len(services))
 		return True
 
 	def get_latest_version(self) -> str | None:
