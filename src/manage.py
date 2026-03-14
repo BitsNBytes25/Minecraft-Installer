@@ -67,15 +67,15 @@ class GameApp(ManualApp):
 		:param game:
 		:return:
 		"""
-		print_header('First Run Configuration')
 
 		if os.geteuid() != 0:
-			print('ERROR: Please run this script with sudo to perform first-run configuration.')
+			logging.error('Please run this script with sudo to perform first-run configuration.')
 			return False
 
 		services = self.get_services()
 		if len(services) == 0:
 			# No services detected, create one.
+			logging.info('No services detected, creating one...')
 			self.create_service('server')
 		return True
 
@@ -418,10 +418,10 @@ class GameService(RCONService):
 		download_url = self.game.get_download_url(target_version)
 
 		if download_url is None:
-			print('Failed to retrieve download URL for latest version.', file=sys.stderr)
+			logging.error('Failed to retrieve download URL for latest version.')
 			return False
 
-		print('Downloading Minecraft Server version %s...' % target_version)
+		logging.info('Updating Minecraft Server to version %s...' % target_version)
 		self.game.download_file(download_url, os.path.join(self.get_app_directory(), 'minecraft_server.jar'))
 
 		with open(version_file, 'w') as f:
