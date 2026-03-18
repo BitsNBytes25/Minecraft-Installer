@@ -31,6 +31,7 @@
 #   BRANCH=--branch=<str> - Use a specific branch of the management script repository DEFAULT=main
 #
 # Changelog:
+#   20260318 - Migrated script to V2 of the API
 #   20251103 - New installer
 
 ############################################
@@ -38,7 +39,7 @@
 ############################################
 
 # Name of the game (used to create the directory)
-INSTALLER_VERSION="v20251204"
+INSTALLER_VERSION="v20260318"
 GAME="Minecraft"
 GAME_DESC="Minecraft Dedicated Server"
 REPO="BitsNBytes25/Minecraft-Installer"

@@ -51,27 +51,6 @@ class GameApp(ManualApp):
 		}
 		self.load()
 
-	def check_update_available(self) -> bool:
-		"""
-		Check if an update is available for this game
-
-		:return:
-		"""
-		for svc in self.get_services():
-			if svc.check_update_available():
-				return True
-		return False
-
-	def update(self):
-		"""
-		Update the game server to the latest version
-
-		:return:
-		"""
-		print_header('Updating all Minecraft Services')
-		for svc in self.get_services():
-			svc.update()
-
 	def first_run(self) -> bool:
 		"""
 		Perform first-run configuration for setting up the game server initially
