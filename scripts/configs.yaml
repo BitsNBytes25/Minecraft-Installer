@@ -502,3 +502,10 @@ service:
     default: latest
     help: "The version of Minecraft to run on the server."
     group: Settings
+  - name: Service Fabric Mod Loader
+    section: System
+    key: fabric-mod-version
+    type: str
+    default: none
+    help: "If you want to use the Fabric mod loader, specify the version here."
+    group: Settings

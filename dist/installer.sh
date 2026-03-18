@@ -627,6 +627,7 @@ function prompt_text() {
 #   1 for yes, 0 for no (or inverted if --invert is set)
 #
 # CHANGELOG:
+#   2025.12.16 - Add text output for non-interactive and empty responses
 #   2025.11.23 - Use is_noninteractive to handle non-interactive mode
 #   2025.11.09 - Add -q (quiet) option to suppress output after prompt (and use return value)
 #   2025.01.01 - Initial version
@@ -655,10 +656,12 @@ function prompt_yn() {
 
 	echo "$PROMPT" >&2
 	if [ "$DEFAULT" == "y" ]; then
+		DEFAULT_TEXT="yes"
 		DEFAULT="$YES"
 		DEFAULT_CODE=$TRUE
 		echo -n "> (Y/n): " >&2
 	else
+		DEFAULT_TEXT="no"
 		DEFAULT="$NO"
 		DEFAULT_CODE=$FALSE
 		echo -n "> (y/N): " >&2
@@ -666,6 +669,7 @@ function prompt_yn() {
 
 	if is_noninteractive; then
 		# In non-interactive mode, return the default value
+		echo "$DEFAULT_TEXT (default non-interactive)" >&2
 		if [ $QUIET -eq 0 ]; then
 			echo $DEFAULT
 		fi
@@ -684,6 +688,12 @@ function prompt_yn() {
 				echo $NO
 			fi
 			return $FALSE;;
+		"")
+			echo "$DEFAULT_TEXT (default choice)" >&2
+			if [ $QUIET -eq 0 ]; then
+				echo $DEFAULT
+			fi
+			return $DEFAULT_CODE;;
 		*)
 			if [ $QUIET -eq 0 ]; then
 				echo $DEFAULT
@@ -1264,6 +1274,13 @@ service:
     default: latest
     help: "The version of Minecraft to run on the server."
     group: Settings
+  - name: Service Fabric Mod Loader
+    section: System
+    key: fabric-mod-version
+    type: str
+    default: none
+    help: "If you want to use the Fabric mod loader, specify the version here."
+    group: Settings
 EOF
 	chown $GAME_USER:$GAME_USER "$GAME_DIR/configs.yaml"
 
@@ -1466,11 +1483,14 @@ function uninstall_application() {
 		systemctl stop $SERVICE
 		# Service files
 		[ -e "/etc/systemd/system/${SERVICE}.service" ] && rm "/etc/systemd/system/${SERVICE}.service"
+		# Environment files
+		[ -e "$GAME_DIR/Environments/${SERVICE}.env" ] && rm "$GAME_DIR/Environments/${SERVICE}.env"
 	done
 
 
 	# Game files
-	[ -d "$GAME_DIR" ] && rm -rf "$GAME_DIR/AppFiles"
+	[ -d "$GAME_DIR/AppFiles" ] && rm -rf "$GAME_DIR/AppFiles"
+	[ -d "$GAME_DIR/Environments" ] && rm -rf "$GAME_DIR/Environments"
 
 	# Management scripts
 	[ -e "$GAME_DIR/manage.py" ] && rm "$GAME_DIR/manage.py"

@@ -126,6 +126,35 @@ class GameApp(ManualApp):
 				versions.append(version['id'])
 		return versions
 
+	def get_fabric_versions_available(self) -> list:
+		"""
+		Get all versions of the Fabric mod loader available.
+		:return:
+		"""
+		src = 'https://meta.fabricmc.net/v2/versions/loader'
+		dat = self.download_json(src)
+		versions = ['none']
+		counter = 0
+		for version in dat:
+			versions.append(version['version'])
+			counter += 1
+			if counter > 30:
+				break
+		return versions
+
+	def get_fabric_launcher_version(self) -> str | None:
+		"""
+		Get the latest stable version of the Fabric launcher.
+
+		:return:
+		"""
+		src = 'https://meta.fabricmc.net/v2/versions/installer'
+		dat = self.download_json(src)
+		for version in dat:
+			if version['stable']:
+				return version['version']
+		return None
+
 	def get_download_url(self, version: str) -> str | None:
 		"""
 		Get the download URL for the server for a specific version.
@@ -195,7 +224,7 @@ class GameService(RCONService):
 			if previous_value:
 				Firewall.remove(int(previous_value), 'udp')
 			Firewall.allow(int(new_value), 'udp', 'Allow %s query port' % self.game.desc)
-		elif option == 'Service Game Version':
+		elif option == 'Service Game Version' or option == 'Service Fabric Mod Loader':
 			# If the game version is updated, we should also update the server to match that version
 			# and change the Java runtime to match the appropriate version for that game version.
 			try:
@@ -203,6 +232,7 @@ class GameService(RCONService):
 			except OSError as e:
 				print('WARNING: Failed to find Java installation for game version %s: %s' % (new_value, str(e)), file=sys.stderr)
 			self.update()
+			self.build_systemd_config()
 		elif option == 'Service Java Path':
 			# If the Java path is updated, generate a new systemd service file.
 			self.build_systemd_config()
@@ -218,6 +248,8 @@ class GameService(RCONService):
 			return self.game.get_versions_available()
 		elif option == 'Service Java Path':
 			return get_java_paths()
+		elif option == 'Service Fabric Mod Loader':
+			return self.game.get_fabric_versions_available()
 		else:
 			return super().get_option_options(option)
 
@@ -341,7 +373,16 @@ class GameService(RCONService):
 		Get the full executable for this game service
 		:return:
 		"""
-		return '%s -Xmx1G -Xms1G -jar minecraft_server.jar nogui' % self.get_option_value('Service Java Path')
+		binary = 'minecraft_server.jar'
+
+		target_fabric_version = self.get_option_value('Service Fabric Mod Loader')
+		if target_fabric_version != 'none':
+			target_version = self.get_target_version()
+			launcher_version = self.game.get_fabric_launcher_version()
+			if launcher_version is not None:
+				binary = 'fabric-server-mc.%s-loader.%s-launcher.%s.jar' % (target_version, target_fabric_version, launcher_version)
+
+		return '%s -Xmx1G -Xms1G -jar %s nogui' % (self.get_option_value('Service Java Path'), binary)
 
 	def get_target_version(self) -> str:
 		"""
@@ -410,6 +451,7 @@ class GameService(RCONService):
 
 		:return:
 		"""
+		logging.debug('Checking for updates on %s' % self.get_name())
 		version_file = os.path.join(self.get_app_directory(), '.version')
 		target_version = self.get_target_version()
 
@@ -417,8 +459,11 @@ class GameService(RCONService):
 			with open(version_file, 'r') as f:
 				current_version = f.read().strip()
 
+			logging.debug('Current version: %s' % current_version)
+			logging.debug('Target version: %s' % target_version)
 			return current_version != target_version
 		else:
+			logging.debug('No version file found, assuming update is available.')
 			return True
 
 	def update(self):
@@ -435,12 +480,37 @@ class GameService(RCONService):
 			logging.error('Failed to retrieve download URL for latest version.')
 			return False
 
-		logging.info('Updating Minecraft Server to version %s...' % target_version)
-		self.game.download_file(download_url, os.path.join(self.get_app_directory(), 'minecraft_server.jar'))
+		if os.path.exists(version_file):
+			with open(version_file, 'r') as f:
+					current_version = f.read().strip()
+		else:
+			current_version = None
 
-		with open(version_file, 'w') as f:
-			f.write(target_version)
-		self.game.ensure_file_ownership(version_file)
+		if current_version == target_version:
+			logging.info('Minecraft Server is already at the latest version (%s).' % target_version)
+		else:
+			logging.info('Updating Minecraft Server to version %s...' % target_version)
+			self.game.download_file(download_url, os.path.join(self.get_app_directory(), 'minecraft_server.jar'))
+
+			with open(version_file, 'w') as f:
+				f.write(target_version)
+			self.game.ensure_file_ownership(version_file)
+
+		# Check fabric too
+		target_fabric_version = self.get_option_value('Service Fabric Mod Loader')
+		if target_fabric_version != 'none':
+			launcher_version = self.game.get_fabric_launcher_version()
+			if launcher_version is None:
+				logging.error('Failed to retrieve Fabric launcher version.')
+				return False
+			target_file = 'fabric-server-mc.%s-loader.%s-launcher.%s.jar' % (target_version, target_fabric_version, launcher_version)
+			source_file = 'https://meta.fabricmc.net/v2/versions/loader/%s/%s/%s/server/jar' % (target_version, target_fabric_version, launcher_version)
+			if not os.path.exists(os.path.join(self.get_app_directory(), target_file)):
+				logging.info('Downloading Fabric server loader %s...' % target_file)
+				self.game.download_file(source_file, os.path.join(self.get_app_directory(), target_file))
+				self.game.ensure_file_ownership(os.path.join(self.get_app_directory(), target_file))
+			else:
+				logging.info('Fabric server loader %s already exists.' % target_file)
 		print('Update complete.')
 		return True
 

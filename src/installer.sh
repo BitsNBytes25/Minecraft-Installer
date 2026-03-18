@@ -178,11 +178,14 @@ function uninstall_application() {
 		systemctl stop $SERVICE
 		# Service files
 		[ -e "/etc/systemd/system/${SERVICE}.service" ] && rm "/etc/systemd/system/${SERVICE}.service"
+		# Environment files
+		[ -e "$GAME_DIR/Environments/${SERVICE}.env" ] && rm "$GAME_DIR/Environments/${SERVICE}.env"
 	done
 
 
 	# Game files
-	[ -d "$GAME_DIR" ] && rm -rf "$GAME_DIR/AppFiles"
+	[ -d "$GAME_DIR/AppFiles" ] && rm -rf "$GAME_DIR/AppFiles"
+	[ -d "$GAME_DIR/Environments" ] && rm -rf "$GAME_DIR/Environments"
 
 	# Management scripts
 	[ -e "$GAME_DIR/manage.py" ] && rm "$GAME_DIR/manage.py"
