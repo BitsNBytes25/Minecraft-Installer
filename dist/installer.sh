@@ -745,19 +745,27 @@ function install_ufw() {
 #   GAME_USER    - User account to install the game under
 #   GAME_DIR     - Directory to install the game into
 #
-# @param $1 Repo Name (e.g., user/repo)
-# @param $2 Branch Name (default: main)
+# @param $1 Application Repo Name (e.g., user/repo)
+# @param $2 Application Branch Name (default: main)
+# @param $3 Warlock Manager Branch to use (default: release-v2)
 #
 # CHANGELOG:
+#   20260319 - Add third option to specify the version of Warlock Manager to use as the base
 #   20260301 - Update to install warlock-manager from github (along with its dependencies) as a pip package
 #
 function install_warlock_manager() {
 	print_header "Performing install_management"
 
 	# Install management console and its dependencies
+
+	# Source URL to download the application from
 	local SRC=""
+	# Github repository of the source application
 	local REPO="$1"
+	# Branch of the source application to download from (default: main)
 	local BRANCH="${2:-main}"
+	# Branch of Warlock Manager to install (default: release-v2)
+	local MANAGER_BRANCH="${3:-release-v2}"
 
 	SRC="https://raw.githubusercontent.com/${REPO}/refs/heads/${BRANCH}/dist/manage.py"
 
@@ -1292,7 +1300,7 @@ EOF
 	# A python virtual environment is now required by Warlock-based managers.
 	sudo -u $GAME_USER python3 -m venv "$GAME_DIR/.venv"
 	sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install --upgrade pip
-	sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install warlock-manager@git+https://github.com/BitsNBytes25/Warlock-Manager.git@release-v2
+	sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install warlock-manager@git+https://github.com/BitsNBytes25/Warlock-Manager.git@$MANAGER_BRANCH
 }
 
 
@@ -1446,7 +1454,7 @@ function install_application() {
 	fi
 
 	# Install the management script
-	install_warlock_manager "$REPO" "$BRANCH"
+	install_warlock_manager "$REPO" "$BRANCH" main
 
 	# Install installer (this script) for uninstallation or manual work
 	download "https://raw.githubusercontent.com/${REPO}/refs/heads/${BRANCH}/dist/installer.sh" "$GAME_DIR/installer.sh"
@@ -1477,21 +1485,7 @@ function postinstall() {
 function uninstall_application() {
 	print_header "Performing uninstall_application"
 
-	for envfile in "$GAME_DIR/Environments/"*.env; do
-		SERVICE=$(basename "$envfile" .env)
-		# Service registration
-		systemctl disable $SERVICE
-		systemctl stop $SERVICE
-		# Service files
-		[ -e "/etc/systemd/system/${SERVICE}.service" ] && rm "/etc/systemd/system/${SERVICE}.service"
-		# Environment files
-		[ -e "$GAME_DIR/Environments/${SERVICE}.env" ] && rm "$GAME_DIR/Environments/${SERVICE}.env"
-	done
-
-
-	# Game files
-	[ -d "$GAME_DIR/AppFiles" ] && rm -rf "$GAME_DIR/AppFiles"
-	[ -d "$GAME_DIR/Environments" ] && rm -rf "$GAME_DIR/Environments"
+	$GAME_DIR/manage.py remove --confirm
 
 	# Management scripts
 	[ -e "$GAME_DIR/manage.py" ] && rm "$GAME_DIR/manage.py"
@@ -1520,11 +1514,13 @@ if [ -e "$GAME_DIR/Environments" ]; then
 	# Check for existing service files to determine if the service is running.
 	# This is important to prevent conflicts with the installer trying to modify files while the service is running.
 	for envfile in "$GAME_DIR/Environments/"*.env; do
-		SERVICE=$(basename "$envfile" .env)
-		if systemctl -q is-active $SERVICE; then
-			echo "$GAME_DESC service is currently running, please stop all instances before running this installer."
-			echo "You can do this with: sudo systemctl stop $SERVICE"
-			exit 1
+		SERVICE="$(basename "$envfile" .env)"
+		if [ "$SERVICE" != "*" ]; then
+			if systemctl -q is-active $SERVICE; then
+				echo "$GAME_DESC service is currently running, please stop all instances before running this installer."
+				echo "You can do this with: sudo systemctl stop $SERVICE"
+				exit 1
+			fi
 		fi
 	done
 fi

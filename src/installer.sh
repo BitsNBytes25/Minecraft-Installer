@@ -141,7 +141,7 @@ function install_application() {
 	fi
 
 	# Install the management script
-	install_warlock_manager "$REPO" "$BRANCH"
+	install_warlock_manager "$REPO" "$BRANCH" main
 
 	# Install installer (this script) for uninstallation or manual work
 	download "https://raw.githubusercontent.com/${REPO}/refs/heads/${BRANCH}/dist/installer.sh" "$GAME_DIR/installer.sh"
@@ -172,21 +172,7 @@ function postinstall() {
 function uninstall_application() {
 	print_header "Performing uninstall_application"
 
-	for envfile in "$GAME_DIR/Environments/"*.env; do
-		SERVICE=$(basename "$envfile" .env)
-		# Service registration
-		systemctl disable $SERVICE
-		systemctl stop $SERVICE
-		# Service files
-		[ -e "/etc/systemd/system/${SERVICE}.service" ] && rm "/etc/systemd/system/${SERVICE}.service"
-		# Environment files
-		[ -e "$GAME_DIR/Environments/${SERVICE}.env" ] && rm "$GAME_DIR/Environments/${SERVICE}.env"
-	done
-
-
-	# Game files
-	[ -d "$GAME_DIR/AppFiles" ] && rm -rf "$GAME_DIR/AppFiles"
-	[ -d "$GAME_DIR/Environments" ] && rm -rf "$GAME_DIR/Environments"
+	$GAME_DIR/manage.py remove --confirm
 
 	# Management scripts
 	[ -e "$GAME_DIR/manage.py" ] && rm "$GAME_DIR/manage.py"
@@ -215,11 +201,13 @@ if [ -e "$GAME_DIR/Environments" ]; then
 	# Check for existing service files to determine if the service is running.
 	# This is important to prevent conflicts with the installer trying to modify files while the service is running.
 	for envfile in "$GAME_DIR/Environments/"*.env; do
-		SERVICE=$(basename "$envfile" .env)
-		if systemctl -q is-active $SERVICE; then
-			echo "$GAME_DESC service is currently running, please stop all instances before running this installer."
-			echo "You can do this with: sudo systemctl stop $SERVICE"
-			exit 1
+		SERVICE="$(basename "$envfile" .env)"
+		if [ "$SERVICE" != "*" ]; then
+			if systemctl -q is-active $SERVICE; then
+				echo "$GAME_DESC service is currently running, please stop all instances before running this installer."
+				echo "You can do this with: sudo systemctl stop $SERVICE"
+				exit 1
+			fi
 		fi
 	done
 fi

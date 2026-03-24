@@ -2,10 +2,15 @@
 #
 # Setup this project for development
 
+HERE="$(dirname "$(realpath "$0")")"
+# Pull the requested version of the manager from the installation script
+WARLOCK_MANAGER="$(grep 'install_warlock_manager' "$HERE/src/installer.sh" | grep -v '#' | head -n1 | cut -d ' ' -f 4 | sed 's:"::g' | sed "s:'::g")"
+WARLOCK_MANAGER="${WARLOCK_MANAGER:-main}"
+
 # Setup a virtual environment for Python with the necessary dependencies
 python3 -m venv .venv
 source .venv/bin/activate
-pip install --force-reinstall warlock-manager@git+https://github.com/BitsNBytes25/Warlock-Manager.git@main
+pip install --force-reinstall warlock-manager@git+https://github.com/BitsNBytes25/Warlock-Manager.git@${WARLOCK_MANAGER}
 
 # Install newest version of scripts compiler
 if which curl; then
@@ -17,3 +22,4 @@ else
 	exit 1
 fi
 chmod +x compile.py
+
