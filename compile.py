@@ -798,8 +798,6 @@ class Script:
 		code.append('')
 		return '\n'.join(code)
 
-		# @todo Support #-p) pidfile="$2"; shift 2;;
-
 	def _generate_argparse_python(self) -> str:
 		code = []
 

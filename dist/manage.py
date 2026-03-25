@@ -21,7 +21,9 @@ sys.path.insert(
 from warlock_manager.apps.manual_app import ManualApp
 from warlock_manager.config.ini_config import INIConfig
 from warlock_manager.config.properties_config import PropertiesConfig
+from warlock_manager.libs import utils
 from warlock_manager.libs.app_runner import app_runner
+from warlock_manager.libs.download import download_json, download_file
 from warlock_manager.libs.firewall import Firewall
 from warlock_manager.libs.java import find_java_version, get_java_paths
 from warlock_manager.libs.tui import print_header
@@ -83,7 +85,7 @@ class GameApp(ManualApp):
 			return self._latest_version
 
 		src_manifest = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json'
-		dat = self.download_json(src_manifest)
+		dat = download_json(src_manifest)
 		if 'latest' in dat and 'release' in dat['latest']:
 			self._latest_version = dat['latest']['release']
 			return self._latest_version
@@ -98,7 +100,7 @@ class GameApp(ManualApp):
 		:return:
 		"""
 		src_manifest = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json'
-		dat = self.download_json(src_manifest)
+		dat = download_json(src_manifest)
 		versions = ['latest']
 		for version in dat['versions']:
 			if version['type'] == 'release':
@@ -111,7 +113,7 @@ class GameApp(ManualApp):
 		:return:
 		"""
 		src = 'https://meta.fabricmc.net/v2/versions/loader'
-		dat = self.download_json(src)
+		dat = download_json(src)
 		versions = ['none']
 		counter = 0
 		for version in dat:
@@ -128,7 +130,7 @@ class GameApp(ManualApp):
 		:return:
 		"""
 		src = 'https://meta.fabricmc.net/v2/versions/installer'
-		dat = self.download_json(src)
+		dat = download_json(src)
 		for version in dat:
 			if version['stable']:
 				return version['version']
@@ -145,7 +147,7 @@ class GameApp(ManualApp):
 		logging.debug('Searching for download URL for version %s...' % version)
 		src_manifest = 'https://piston-meta.mojang.com/mc/game/version_manifest_v2.json'
 		meta_url = None
-		dat = self.download_json(src_manifest)
+		dat = download_json(src_manifest)
 		for version_dat in dat['versions']:
 			if version_dat['id'] == version:
 				meta_url = version_dat['url']
@@ -157,7 +159,7 @@ class GameApp(ManualApp):
 
 		# Now that the meta_url for the package is ready, grab that which will contain the download URL for the server
 		logging.debug('Retrieving version metadata from %s...' % meta_url)
-		dat = self.download_json(meta_url)
+		dat = download_json(meta_url)
 		if 'downloads' in dat and 'server' in dat['downloads'] and 'url' in dat['downloads']['server']:
 			return dat['downloads']['server']['url']
 
@@ -322,12 +324,32 @@ class GameService(RCONService):
 	def get_port_definitions(self) -> list:
 		"""
 		Get a list of port definitions for this service
+
+		Each entry in the returned list should contain 3 items:
+
+		* Config name or integer of port (for non-definable ports)
+		* 'UDP' or 'TCP' to indicate protocol
+		* Short description of the port purpose
+		* Optional boolean to indicate if this is an optional port (ie: not checked at startup)
+
+		Example:
+
+		```python
+		return [
+			['Game Port', 'UDP', 'Primary game port for clients to connect to', False],
+			[25565, 'TCP', 'RCON port, statically assigned and cannot be changed', True]
+		]
+		```
+
 		:return:
 		"""
+		query_port_optional = not self.get_option_value('Enable Query')
+		rcon_port_optional = not self.get_option_value('Enable RCON')
+
 		return [
-			('Query Port', 'udp', '%s query port' % self.game.desc),
-			('Server Port', 'tcp', '%s game port' % self.game.desc),
-			('RCON Port', 'tcp', '%s RCON port' % self.game.desc)
+			('Query Port', 'udp', '%s query port' % self.game.name, query_port_optional),
+			('Server Port', 'tcp', '%s game port' % self.game.name),
+			('RCON Port', 'tcp', '%s RCON port' % self.game.name, rcon_port_optional)
 		]
 
 	def get_commands(self) -> None | list[str]:
@@ -376,6 +398,67 @@ class GameService(RCONService):
 
 		return target_version
 
+	def get_mods(self) -> list:
+		"""
+		Get a list of mods installed on the server
+		:return:
+		"""
+
+		ret = []
+		if not os.path.exists(os.path.join(self.get_app_directory(), 'mods')):
+			return ret
+
+		for file in os.listdir(os.path.join(self.get_app_directory(), 'mods')):
+			if file.endswith('.jar'):
+				name = file.replace('.jar', '')
+				ret.append({
+					'id': name,
+					'name': name,
+					'path': os.path.join(self.get_app_directory(), 'mods', file),
+					'enabled': True
+				})
+			elif file.endswith('.disabled'):
+				name = file.replace('.disabled', '')
+				ret.append({
+					'id': name,
+					'name': name,
+					'path': os.path.join(self.get_app_directory(), 'mods', file),
+					'enabled': False
+				})
+
+		return ret
+
+	def enable_mod(self, mod_id: str):
+		mods = self.get_mods()
+		for mod in mods:
+			if mod['id'] == mod_id:
+				if mod['enabled']:
+					logging.warning('Mod %s is already enabled.' % mod_id)
+					return
+				os.rename(mod['path'], mod['path'].replace('.disabled', '.jar'))
+				return
+
+		logging.warning('Mod %s not found.' % mod_id)
+
+	def disable_mod(self, mod_id: str):
+		mods = self.get_mods()
+		for mod in mods:
+			if mod['id'] == mod_id:
+				if not mod['enabled']:
+					logging.warning('Mod %s is already disabled.' % mod_id)
+					return
+				os.rename(mod['path'], mod['path'].replace('.jar', '.disabled'))
+				return
+
+		logging.warning('Mod %s not found.' % mod_id)
+
+	def remove_mod(self, mod_id: str):
+		mods = self.get_mods()
+		for mod in mods:
+			if mod['id'] == mod_id:
+				os.remove(mod['path'])
+				return
+
 	def assign_java_path(self):
 		"""
 		Assign the appropriate Java version for the currently selected game version and set the Java path option accordingly.
@@ -403,7 +486,7 @@ class GameService(RCONService):
 		eula = os.path.join(self.get_app_directory(), 'eula.txt')
 		with open(eula, 'w') as f:
 			f.write('eula=true\n')
-		self.game.ensure_file_ownership(eula)
+		utils.ensure_file_ownership(eula)
 
 		if not self.option_has_value('Level Name'):
 			# Trim the prefix off the service name to get the default level name
@@ -455,6 +538,10 @@ class GameService(RCONService):
 		target_version = self.get_target_version()
 		download_url = self.game.get_download_url(target_version)
 
+		if not self.is_stopped():
+			logging.error('Cannot update while the server is running.')
+			return False
+
 		if download_url is None:
 			logging.error('Failed to retrieve download URL for latest version.')
 			return False
@@ -469,11 +556,11 @@ class GameService(RCONService):
 			logging.info('Minecraft Server is already at the latest version (%s).' % target_version)
 		else:
 			logging.info('Updating Minecraft Server to version %s...' % target_version)
-			self.game.download_file(download_url, os.path.join(self.get_app_directory(), 'minecraft_server.jar'))
+			download_file(download_url, os.path.join(self.get_app_directory(), 'minecraft_server.jar'))
 
 			with open(version_file, 'w') as f:
 				f.write(target_version)
-			self.game.ensure_file_ownership(version_file)
+			utils.ensure_file_ownership(version_file)
 
 		# Check fabric too
 		target_fabric_version = self.get_option_value('Service Fabric Mod Loader')
@@ -486,8 +573,7 @@ class GameService(RCONService):
 			source_file = 'https://meta.fabricmc.net/v2/versions/loader/%s/%s/%s/server/jar' % (target_version, target_fabric_version, launcher_version)
 			if not os.path.exists(os.path.join(self.get_app_directory(), target_file)):
 				logging.info('Downloading Fabric server loader %s...' % target_file)
-				self.game.download_file(source_file, os.path.join(self.get_app_directory(), target_file))
-				self.game.ensure_file_ownership(os.path.join(self.get_app_directory(), target_file))
+				download_file(source_file, os.path.join(self.get_app_directory(), target_file))
 			else:
 				logging.info('Fabric server loader %s already exists.' % target_file)
 		print('Update complete.')
@@ -504,7 +590,6 @@ class GameService(RCONService):
 			'banned-players.json',
 			'ops.json',
 			'whitelist.json',
-			'plugins',
 			self.get_name(),
 			self.get_name() + '_nether',
 			self.get_name() + '_the_end'
