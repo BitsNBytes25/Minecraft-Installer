@@ -460,8 +460,10 @@ class GameService(RCONService):
 			java_version = 11
 		elif is_version_compatible(target_version, '1.17.0', '1.20.4'):
 			java_version = 17
-		else:
+		elif is_version_compatible(target_version, '1.20.5', '25.99.99'):
 			java_version = 21
+		else:
+			java_version = 25
 
 		logging.debug('Assigning Java version %d for game version %s' % (java_version, target_version))
 		java_path = find_java_version(java_version)

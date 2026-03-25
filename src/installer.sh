@@ -103,9 +103,10 @@ function install_application() {
 		useradd -m -U $GAME_USER
 	fi
 
-	if [ ! -d "/home/${GAME_USER}" ]; then
-		mkdir -p "/home/${GAME_USER}"
-		chown $GAME_USER:$GAME_USER "/home/${GAME_USER}"
+	# Ensure the target directory exists and is owned by the game user
+	if [ ! -d "$GAME_DIR" ]; then
+		mkdir -p "$GAME_DIR"
+		chown $GAME_USER:$GAME_USER "$GAME_DIR"
 	fi
 
 	# Preliminary requirements
@@ -118,11 +119,13 @@ function install_application() {
 	# 1.12.0 - 1.16.5   | Java 11
 	# 1.17 - 1.20.4     | Java 17
 	# 1.20.5 +          | Java 21
+	# 26+               | Java 25
 
 	install_openjdk 8
 	install_openjdk 11
 	install_openjdk 17
 	install_openjdk 21
+	install_openjdk 25
 
 	if [ "$FIREWALL" == "1" ]; then
 		if [ "$(get_enabled_firewall)" == "none" ]; then
@@ -191,6 +194,8 @@ function uninstall_application() {
 
 if [ $MODE_UNINSTALL -eq 1 ]; then
 	MODE="uninstall"
+elif [ -e "$GAME_DIR/AppFiles" ]; then
+	MODE="reinstall"
 else
 	# Default to install mode
 	MODE="install"
@@ -235,12 +240,6 @@ else
 	echo "Using default installation directory of ${GAME_DIR}"
 fi
 
-if [ -e "$GAME_DIR/AppFiles" ]; then
-	EXISTING=1
-else
-	EXISTING=0
-fi
-
 ############################################
 ## Installer
 ############################################
@@ -249,16 +248,28 @@ fi
 if [ "$MODE" == "install" ]; then
 
 	if [ $SKIP_FIREWALL -eq 1 ]; then
+		echo "Firewall explictly disabled, skipping installation of a system firewall"
 		FIREWALL=0
-	elif [ $EXISTING -eq 0 ] && prompt_yn -q --default-yes "Install system firewall?"; then
+	elif prompt_yn -q --default-yes "Install system firewall?"; then
 		FIREWALL=1
 	else
 		FIREWALL=0
 	fi
 
-	if [ $EXISTING -eq 1 ]; then
-		upgrade_application
-	fi
+	install_application
+
+	postinstall
+
+	# Print some instructions and useful tips
+    print_header "$GAME_DESC Installation Complete"
+fi
+
+# Operations needed to be performed during a reinstallation / upgrade
+if [ "$MODE" == "reinstall" ]; then
+
+	FIREWALL=0
+
+	upgrade_application
 
 	install_application
 
