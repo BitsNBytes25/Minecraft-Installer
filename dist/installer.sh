@@ -750,6 +750,7 @@ function install_ufw() {
 # @param $3 Warlock Manager Branch to use (default: release-v2)
 #
 # CHANGELOG:
+#   20260325 - Update to install warlock-manager from PyPI if a version number is specified instead of a branch name
 #   20260319 - Add third option to specify the version of Warlock Manager to use as the base
 #   20260301 - Update to install warlock-manager from github (along with its dependencies) as a pip package
 #
@@ -766,6 +767,14 @@ function install_warlock_manager() {
 	local BRANCH="${2:-main}"
 	# Branch of Warlock Manager to install (default: release-v2)
 	local MANAGER_BRANCH="${3:-release-v2}"
+	local MANAGER_SOURCE
+
+	if [[ "$MANAGER_BRANCH" =~ ^[0-9]+\.[0-9]+$ ]]; then
+        MANAGER_SOURCE="pip"
+        MANAGER_BRANCH=">=${MANAGER_BRANCH}.0,<=${MANAGER_BRANCH}.9999"
+    else
+        MANAGER_SOURCE="github"
+    fi
 
 	SRC="https://raw.githubusercontent.com/${REPO}/refs/heads/${BRANCH}/dist/manage.py"
 
@@ -1300,7 +1309,13 @@ EOF
 	# A python virtual environment is now required by Warlock-based managers.
 	sudo -u $GAME_USER python3 -m venv "$GAME_DIR/.venv"
 	sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install --upgrade pip
-	sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install warlock-manager@git+https://github.com/BitsNBytes25/Warlock-Manager.git@$MANAGER_BRANCH
+	if [ "$MANAGER_SOURCE" == "pip" ]; then
+		# Install from PyPI with version specifier
+		sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install "warlock-manager${MANAGER_BRANCH}"
+	else
+		# Install directly from GitHub
+		sudo -u $GAME_USER "$GAME_DIR/.venv/bin/pip" install warlock-manager@git+https://github.com/BitsNBytes25/Warlock-Manager.git@$MANAGER_BRANCH
+	fi
 }
 
 
@@ -1454,7 +1469,7 @@ function install_application() {
 	fi
 
 	# Install the management script
-	install_warlock_manager "$REPO" "$BRANCH" main
+	install_warlock_manager "$REPO" "$BRANCH" "2.1"
 
 	# Install installer (this script) for uninstallation or manual work
 	download "https://raw.githubusercontent.com/${REPO}/refs/heads/${BRANCH}/dist/installer.sh" "$GAME_DIR/installer.sh"
