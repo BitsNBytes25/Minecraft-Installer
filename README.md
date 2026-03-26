@@ -27,6 +27,12 @@ Supports multi-instance management, advanced configuration, and integrates with 
 
 ### Installation
 
+#### Super Easy Install
+
+For easier installation and management, install this with the [Warlock Manager](https://github.com/BitsNBytes25/Warlock).
+
+Warlock provides a web interface for managing Minecraft servers on your own hardware.
+
 #### Quick Install
 
 Run the installer script as root (or with sudo):
@@ -63,6 +69,28 @@ After installation, use the management console:
 
 ```bash
 python3 /home/minecraft/manage.py <command>
+```
+
+With no arguments, you will be presented with a TUI menu to manage the game server.
+
+```
+┌──────────────────────────────────────────────────────────────────────────────┐
+│             Welcome to the Minecraft Java Edition Server Manager             │
+│                                                                              │
+│                    Built with the Warlock Manager v2.1.0                     │
+│                            https://warlock.nexus                             │
+└──────────────────────────────────────────────────────────────────────────────┘
+
+| # | Service           | Name    |  Port | Auto-Start  | Status     | CPU | Mem | Players |
+| -:| ----------------- | ------- | -----:| ----------- | ---------- | ---:| ---:| ------- |
+| 1 | minecraft-myclone | myclone | 25567 | ❌ Disabled | 🛑 Stopped | N/A | N/A | 0 / 20  |
+| 2 | minecraft-another | another | 25566 | ❌ Disabled | 🛑 Stopped | N/A | N/A | 0 / 20  |
+
+1-2 to manage individual map settings
+Configure: global [O]ptions | [C]reate Service
+Control: [S]tart all | s[T]op all | [R]estart all
+Manage Data: [B]ackup all | [W]ipe all
+or [Q]uit to exit
 ```
 
 ---

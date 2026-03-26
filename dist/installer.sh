@@ -769,6 +769,7 @@ function install_warlock_manager() {
 	# Branch of Warlock Manager to install (default: release-v2)
 	local MANAGER_BRANCH="${3:-release-v2}"
 	local MANAGER_SOURCE
+	local MANAGER_SHA
 
 	if [[ "$MANAGER_BRANCH" =~ ^[0-9]+\.[0-9]+$ ]]; then
         MANAGER_SOURCE="pip"
@@ -786,6 +787,25 @@ function install_warlock_manager() {
 
 	chown $GAME_USER:$GAME_USER "$GAME_DIR/manage.py"
 	chmod +x "$GAME_DIR/manage.py"
+
+	# Record the hash of the install and branch name for display in the management UI and checking for updates.
+	# We use the direct hash because installation scripts may not necessarily use tagged versions.
+	MANAGER_SHA="$(curl -s "https://api.github.com/repos/${REPO}/commits/${BRANCH}" \
+        | grep '"sha":' \
+        | head -n 1 \
+        | sed -E 's/.*"sha": *"([^"]+)".*/\1/')"
+
+	# Record this hash along with the branch into a file accessible by the manager.
+	# This will be read by the Python, so JSON is fine.
+	cat > "$GAME_DIR/.manage.json" <<EOF
+{
+	"source": "github",
+	"repo": "${REPO}",
+	"branch": "${BRANCH}",
+	"commit": "${MANAGER_SHA}"
+}
+EOF
+	chown $GAME_USER:$GAME_USER "$GAME_DIR/.manage.json"
 
 	# Install configuration definitions
 	cat > "$GAME_DIR/configs.yaml" <<EOF
