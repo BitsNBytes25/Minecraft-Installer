@@ -145,7 +145,7 @@ function install_application() {
 	fi
 
 	# Install the management script
-	install_warlock_manager "$REPO" "$BRANCH" "2.1"
+	install_warlock_manager "$REPO" "$BRANCH" "2.1.2"
 
 	# Install installer (this script) for uninstallation or manual work
 	download "https://raw.githubusercontent.com/${REPO}/refs/heads/${BRANCH}/dist/installer.sh" "$GAME_DIR/installer.sh"

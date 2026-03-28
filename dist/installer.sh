@@ -751,6 +751,7 @@ function install_ufw() {
 # @param $3 Warlock Manager Branch to use (default: release-v2)
 #
 # CHANGELOG:
+#   20260326 - Add support for full version strings
 #   20260325 - Update to install warlock-manager from PyPI if a version number is specified instead of a branch name
 #   20260319 - Add third option to specify the version of Warlock Manager to use as the base
 #   20260301 - Update to install warlock-manager from github (along with its dependencies) as a pip package
@@ -771,10 +772,16 @@ function install_warlock_manager() {
 	local MANAGER_SOURCE
 	local MANAGER_SHA
 
-	if [[ "$MANAGER_BRANCH" =~ ^[0-9]+\.[0-9]+$ ]]; then
+	if [[ "$MANAGER_BRANCH" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+		# Support 1.2.3 version strings; indicates at least .3 of the revision.
+		MANAGER_SOURCE="pip"
+		MANAGER_BRANCH=">=${MANAGER_BRANCH},<=$(echo $MANAGER_BRANCH | sed 's:\.[0-9]*$:.9999:')"
+	elif [[ "$MANAGER_BRANCH" =~ ^[0-9]+\.[0-9]+$ ]]; then
+		# Support 1.2 version strings; indicates it just must be within this API version
         MANAGER_SOURCE="pip"
         MANAGER_BRANCH=">=${MANAGER_BRANCH}.0,<=${MANAGER_BRANCH}.9999"
     else
+    	# Not a version string, probably a branch name instead.
         MANAGER_SOURCE="github"
     fi
 
@@ -1493,7 +1500,7 @@ function install_application() {
 	fi
 
 	# Install the management script
-	install_warlock_manager "$REPO" "$BRANCH" "2.1"
+	install_warlock_manager "$REPO" "$BRANCH" "2.1.2"
 
 	# Install installer (this script) for uninstallation or manual work
 	download "https://raw.githubusercontent.com/${REPO}/refs/heads/${BRANCH}/dist/installer.sh" "$GAME_DIR/installer.sh"
