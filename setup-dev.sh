@@ -8,7 +8,11 @@ WARLOCK_MANAGER="$(grep 'install_warlock_manager' "$HERE/src/installer.sh" | gre
 WARLOCK_MANAGER="${WARLOCK_MANAGER:-main}"
 WARLOCK_NOTICE=0
 
-if [[ "$WARLOCK_MANAGER" =~ ^[0-9]+\.[0-9]+$ ]]; then
+if [[ "$WARLOCK_MANAGER" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+	# Full version string specified; the release branch probably contains the newest version.
+	WARLOCK_MANAGER="release-v$(echo $WARLOCK_MANAGER | sed 's:\.[0-9]*$::')"
+	WARLOCK_NOTICE=1
+elif [[ "$WARLOCK_MANAGER" =~ ^[0-9]+\.[0-9]+$ ]]; then
 	# If a release version is requested, switch to the development branch related to that branch.
 	# This could cause a potential disconnect between dev and production versions,
 	# but it allows for testing development of a specific branch prior to deployment.

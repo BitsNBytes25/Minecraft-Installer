@@ -1,9 +1,13 @@
 #!/usr/bin/env python3
+import json
 import logging
+import shutil
 import sys
 import os
 import random
 import string
+import zipfile
+import tomllib
 # Include the virtual environment site-packages in sys.path
 here = os.path.dirname(os.path.realpath(__file__))
 if not os.path.exists(os.path.join(here, '.venv')):
@@ -21,16 +25,156 @@ sys.path.insert(
 from warlock_manager.apps.manual_app import ManualApp
 from warlock_manager.config.ini_config import INIConfig
 from warlock_manager.config.properties_config import PropertiesConfig
-from warlock_manager.libs import utils
-from warlock_manager.libs.app_runner import app_runner
 from warlock_manager.libs.download import download_json, download_file
-from warlock_manager.libs.firewall import Firewall
 from warlock_manager.libs.java import find_java_version, get_java_paths
-from warlock_manager.libs.tui import print_header
 from warlock_manager.services.rcon_service import RCONService
-from warlock_manager.libs.version import is_version_older, is_version_compatible
+from warlock_manager.libs.version import is_version_older, is_version_compatible, is_version_newer
+from warlock_manager.libs.app_runner import app_runner
+from warlock_manager.libs.firewall import Firewall
+from warlock_manager.libs import utils
+from warlock_manager.mods.base_mod import BaseMod
+
+# Load the application runner responsible for interfacing with CLI arguments
+# and providing default functionality for running the manager.
+
+# If your script manages the firewall, (recommended), import the Firewall library
+
+# Utilities provided by Warlock that are common to many applications
+
+# This game supports full mod support
 
 here = os.path.dirname(os.path.realpath(__file__))
+
+
+class GameMod(BaseMod):
+	@classmethod
+	def from_jar(cls, jar_file: str) -> 'GameMod':
+		"""
+		Generate a Mod entry based on data from a Minecraft jar
+
+		:param data:
+		:param version:
+		:return:
+		"""
+		basename = os.path.basename(jar_file)
+		registered_mods = cls.get_registered_mods()
+		for mod in registered_mods:
+			if mod.package == basename:
+				return mod
+
+		mod_data = None
+		manifest_data = None
+		jar_data = {}
+		with zipfile.ZipFile(jar_file, 'r') as jar:
+			if 'fabric.mod.json' in jar.namelist():
+				with jar.open('fabric.mod.json') as f:
+					mod_data = json.load(f)
+			elif 'META-INF/mods.toml' in jar.namelist():
+				with jar.open('META-INF/mods.toml') as f:
+					mod_data = tomllib.load(f)
+			elif 'META-INF/neoforge.mods.toml' in jar.namelist():
+				with jar.open('META-INF/neoforge.mods.toml') as f:
+					mod_data = tomllib.load(f)
+			elif 'mcmod.info' in jar.namelist():
+				with jar.open('mcmod.info') as f:
+					mod_data = json.load(f)
+
+			if 'META-INF/MANIFEST.MF' in jar.namelist():
+				with jar.open('META-INF/MANIFEST.MF') as f:
+					manifest_data = f.read().decode('utf-8')
+
+		# Ensure there's a cache of this mod
+		package_path = os.path.join(utils.get_app_directory(), 'Packages', basename)
+		if not os.path.exists(package_path):
+			utils.ensure_file_parent_exists(package_path)
+			shutil.copyfile(jar_file, package_path)
+			utils.ensure_file_ownership(package_path)
+
+		mod = GameMod()
+		mod.package = basename
+		mod.name = basename
+		mod.files = ['mods/' + basename]
+
+		if mod_data is None:
+			mod.register()
+			return mod
+
+		# Load the MANIFEST into an object
+		if manifest_data is not None:
+			for line in manifest_data.splitlines():
+				if line.startswith('Implementation-Title: '):
+					jar_data['jarTitle'] = line[21:].strip()
+				elif line.startswith('Implementation-Version: '):
+					jar_data['jarVersion'] = line[24:].strip()
+				elif line.startswith('Implementation-Vendor: '):
+					jar_data['jarVendor'] = line[24:].strip()
+
+		if 'authors' in mod_data:
+			# Fabric
+			mod.author = mod_data['authors'][0]
+		elif 'mods' in mod_data and len(mod_data['mods']) > 0 and 'authors' in mod_data['mods'][0]:
+			# Neoforge
+			mod.author = mod_data['mods'][0]['authors']
+
+		if 'contact' in mod_data and 'homepage' in mod_data['contact']:
+			# Fabric
+			mod.url = mod_data['contact']['homepage']
+		elif 'mods' in mod_data and len(mod_data['mods']) > 0 and 'displayURL' in mod_data['mods'][0]:
+			# Neoforge
+			mod.url = mod_data['mods'][0]['displayURL']
+
+		if 'description' in mod_data:
+			# Fabric
+			mod.description = mod_data['description']
+		elif 'mods' in mod_data and len(mod_data['mods']) > 0 and 'description' in mod_data['mods'][0]:
+			# Neoforge
+			mod.description = mod_data['mods'][0]['description']
+
+		if 'version' in mod_data:
+			# Fabric
+			mod.version = mod_data['version']
+		elif 'mods' in mod_data and len(mod_data['mods']) > 0 and 'version' in mod_data['mods'][0]:
+			# Neoforge
+			mod.version = mod_data['mods'][0]['version']
+			if mod.version == '${file.jarVersion}':
+				mod.version = jar_data['jarVersion'] if 'jarVersion' in jar_data else None
+
+		if 'name' in mod_data:
+			# Fabric
+			mod.name = mod_data['name']
+		elif 'mods' in mod_data and len(mod_data['mods']) > 0 and 'displayName' in mod_data['mods'][0]:
+			# Neoforge
+			mod.name = mod_data['mods'][0]['displayName']
+
+		if 'id' in mod_data:
+			# Fabric
+			mod.id = mod_data['id']
+		elif 'mods' in mod_data and len(mod_data['mods']) > 0 and 'modId' in mod_data['mods'][0]:
+			# Neoforge
+			mod.id = mod_data['mods'][0]['modId']
+
+		mod.register()
+		return mod
+
+	@classmethod
+	def find_mods(cls, mod_lookup: str) -> list['BaseMod']:
+		"""
+		Search for a mod from mods present locally in Packages/
+		:param mod_lookup:
+		:return:
+		"""
+		all_mods = []
+		matched_mods = []
+		if os.path.exists(os.path.join(utils.get_app_directory(), 'Packages')):
+			for file in os.listdir(os.path.join(utils.get_app_directory(), 'Packages')):
+				if file.endswith('.jar'):
+					all_mods.append(GameMod.from_jar(os.path.join(utils.get_app_directory(), 'Packages', file)))
+
+		for mod in all_mods:
+			if mod_lookup.lower() in mod.name.lower():
+				matched_mods.append(mod)
+
+		return matched_mods
 
 
 class GameApp(ManualApp):
@@ -45,6 +189,7 @@ class GameApp(ManualApp):
 		self.service_prefix = 'minecraft-'
 		self.desc = 'Minecraft Java Edition'
 		self.service_handler = GameService
+		self.mod_handler = GameMod
 		self.multi_binary = True
 		self._latest_version = None
 
@@ -398,9 +543,10 @@ class GameService(RCONService):
 
 		return target_version
 
-	def get_mods(self) -> list:
+	def get_enabled_mods(self) -> list[GameMod]:
 		"""
-		Get a list of mods installed on the server
+		Get all enabled mods that are locally available on this service
+
 		:return:
 		"""
 
@@ -410,54 +556,47 @@ class GameService(RCONService):
 
 		for file in os.listdir(os.path.join(self.get_app_directory(), 'mods')):
 			if file.endswith('.jar'):
-				name = file.replace('.jar', '')
-				ret.append({
-					'id': name,
-					'name': name,
-					'path': os.path.join(self.get_app_directory(), 'mods', file),
-					'enabled': True
-				})
-			elif file.endswith('.disabled'):
-				name = file.replace('.disabled', '')
-				ret.append({
-					'id': name,
-					'name': name,
-					'path': os.path.join(self.get_app_directory(), 'mods', file),
-					'enabled': False
-				})
+				ret.append(GameMod.from_jar(os.path.join(self.get_app_directory(), 'mods', file)))
 
 		return ret
 
-	def enable_mod(self, mod_id: str):
-		mods = self.get_mods()
-		for mod in mods:
-			if mod['id'] == mod_id:
-				if mod['enabled']:
-					logging.warning('Mod %s is already enabled.' % mod_id)
-					return
-				os.rename(mod['path'], mod['path'].replace('.disabled', '.jar'))
-				return
+	def add_mod(self, mod: 'BaseMod') -> bool:
+		"""
+		Install a mod
 
-		logging.warning('Mod %s not found.' % mod_id)
+		:param mod:
+		:return:
+		"""
+		logging.info('Installing mod %s' % mod.name)
+		enabled_mods = self.get_enabled_mods()
+		for check_mod in enabled_mods:
+			if check_mod.id == mod.id and check_mod.name == mod.name:
+				if not is_version_newer(check_mod.version, mod.version):
+					logging.error('Mod %s is already installed' % mod.name)
+					return True
+				else:
+					# Remove old version of this mod
+					os.remove(os.path.join(self.get_app_directory(), 'mods', check_mod.package))
 
-	def disable_mod(self, mod_id: str):
-		mods = self.get_mods()
-		for mod in mods:
-			if mod['id'] == mod_id:
-				if not mod['enabled']:
-					logging.warning('Mod %s is already disabled.' % mod_id)
-					return
-				os.rename(mod['path'], mod['path'].replace('.jar', '.disabled'))
-				return
+		# Copy the package into the game executable directory.
+		source_archive = os.path.join(utils.get_app_directory(), 'Packages', mod.package)
+		target_archive = os.path.join(self.get_app_directory(), 'mods', mod.package)
+		shutil.copy(source_archive, target_archive)
+		return True
 
-		logging.warning('Mod %s not found.' % mod_id)
+	def remove_mod(self, mod: 'BaseMod') -> bool:
+		"""
+		Remove a mod
 
-	def remove_mod(self, mod_id: str):
-		mods = self.get_mods()
-		for mod in mods:
-			if mod['id'] == mod_id:
-				os.remove(mod['path'])
-				return
+		Will completely uninstall the requested mod
+
+		:param mod:
+		:return:
+		"""
+		target_archive = os.path.join(self.get_app_directory(), 'mods', mod.package)
+		if os.path.exists(target_archive):
+			os.remove(target_archive)
+		return True
 
 	def assign_java_path(self):
 		"""
