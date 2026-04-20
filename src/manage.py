@@ -193,7 +193,11 @@ class GameApp(ManualApp):
 			logging.info('No services detected, creating one...')
 			self.create_service('server')
 		else:
-			logging.info('Detected %d services, skipping first-run creation.' % len(services))
+			# Ensure services match new format
+			for service in services:
+				logging.info('Ensuring %s service file is on latest format' % service.service)
+				service.build_systemd_config()
+				service.reload()
 		return True
 
 	def get_latest_version(self) -> str | None:
