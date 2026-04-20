@@ -29,12 +29,13 @@ from warlock_manager.libs.firewall import Firewall
 from warlock_manager.libs import utils
 
 # This game supports full mod support
-from warlock_manager.mods.base_mod import BaseMod
+#from warlock_manager.mods.base_mod import BaseMod
+from warlock_manager.mods.warlock_nexus_mod import WarlockNexusMod
 
 here = os.path.dirname(os.path.realpath(__file__))
 
 
-class GameMod(BaseMod):
+class GameMod(WarlockNexusMod):
 	@classmethod
 	def from_jar(cls, jar_file: str) -> 'GameMod':
 		"""
@@ -72,7 +73,7 @@ class GameMod(BaseMod):
 					manifest_data = f.read().decode('utf-8')
 
 		# Ensure there's a cache of this mod
-		package_path = os.path.join(utils.get_app_directory(), 'Packages', basename)
+		package_path = os.path.join(utils.get_base_directory(), 'Packages', basename)
 		if not os.path.exists(package_path):
 			utils.ensure_file_parent_exists(package_path)
 			shutil.copyfile(jar_file, package_path)
@@ -81,7 +82,7 @@ class GameMod(BaseMod):
 		mod = GameMod()
 		mod.package = basename
 		mod.name = basename
-		mod.files = ['mods/' + basename]
+		mod.files = {'@': 'mods/' + basename}
 
 		if mod_data is None:
 			mod.register()
@@ -144,25 +145,13 @@ class GameMod(BaseMod):
 		mod.register()
 		return mod
 
-	@classmethod
-	def find_mods(cls, mod_lookup: str) -> list['BaseMod']:
+	def calculate_files(self):
 		"""
-		Search for a mod from mods present locally in Packages/
-		:param mod_lookup:
+		Calculate the files in this mod that are to be installed.
+
 		:return:
 		"""
-		all_mods = []
-		matched_mods = []
-		if os.path.exists(os.path.join(utils.get_app_directory(), 'Packages')):
-			for file in os.listdir(os.path.join(utils.get_app_directory(), 'Packages')):
-				if file.endswith('.jar'):
-					all_mods.append(GameMod.from_jar(os.path.join(utils.get_app_directory(), 'Packages', file)))
-
-		for mod in all_mods:
-			if mod_lookup.lower() in mod.name.lower():
-				matched_mods.append(mod)
-
-		return matched_mods
+		self.files = {'@': os.path.join('mods', self.package)}
 
 
 class GameApp(ManualApp):
@@ -548,7 +537,7 @@ class GameService(RCONService):
 
 		return ret
 
-	def add_mod(self, mod: 'BaseMod') -> bool:
+	def add_mod(self, mod: GameMod) -> bool:
 		"""
 		Install a mod
 
@@ -556,34 +545,32 @@ class GameService(RCONService):
 		:return:
 		"""
 		logging.info('Installing mod %s' % mod.name)
-		enabled_mods = self.get_enabled_mods()
-		for check_mod in enabled_mods:
-			if check_mod.id == mod.id and check_mod.name == mod.name:
-				if not is_version_newer(check_mod.version, mod.version):
-					logging.error('Mod %s is already installed' % mod.name)
-					return True
-				else:
-					# Remove old version of this mod
-					os.remove(os.path.join(self.get_app_directory(), 'mods', check_mod.package))
+
+		enabled_mod = self.get_mod(mod.provider, mod.id)
+		if enabled_mod is not None:
+			if is_version_newer(enabled_mod.version, mod.version):
+				logging.error('Mod %s is already installed' % mod.name)
+				return True
+			else:
+				# Remove old version of this mod
+				self.remove_mod_files(enabled_mod)
+
+		logging.info('Ensuring %s is downloaded' % mod.package)
+		mod.download()
+		mod.calculate_files()
+
+		if self.check_mod_files_installed(mod, 'any'):
+			logging.error('Mod %s will overwrite existing files. Aborting.' % mod.name)
+			return False
 
 		# Copy the package into the game executable directory.
-		source_archive = os.path.join(utils.get_app_directory(), 'Packages', mod.package)
-		target_archive = os.path.join(self.get_app_directory(), 'mods', mod.package)
-		shutil.copy(source_archive, target_archive)
-		return True
+		self.install_mod_files(mod)
 
-	def remove_mod(self, mod: 'BaseMod') -> bool:
-		"""
-		Remove a mod
+		# Save the newly installed mod back to the registry
+		mod.register()
 
-		Will completely uninstall the requested mod
-
-		:param mod:
-		:return:
-		"""
-		target_archive = os.path.join(self.get_app_directory(), 'mods', mod.package)
-		if os.path.exists(target_archive):
-			os.remove(target_archive)
+		# Handle all dependencies for this mod
+		self.install_mod_dependencies(mod)
 		return True
 
 	def assign_java_path(self):
@@ -677,7 +664,7 @@ class GameService(RCONService):
 
 		if os.path.exists(version_file):
 			with open(version_file, 'r') as f:
-					current_version = f.read().strip()
+				current_version = f.read().strip()
 		else:
 			current_version = None
 
@@ -723,6 +710,32 @@ class GameService(RCONService):
 			self.get_name() + '_nether',
 			self.get_name() + '_the_end'
 		]
+
+	def get_version(self) -> str | None:
+		"""
+		Get the version of Minecraft installed
+
+		:return:
+		"""
+		version_file = os.path.join(self.get_app_directory(), '.version')
+		if os.path.exists(version_file):
+			with open(version_file, 'r') as f:
+				current_version = f.read().strip()
+		else:
+			current_version = None
+
+		return current_version
+
+	def get_loader(self) -> str | None:
+		"""
+		Get the launcher that is selected to run this game server
+
+		:return:
+		"""
+		if self.get_option_value('Service Fabric Mod Loader') != 'none':
+			return 'fabric'
+		else:
+			return None
 
 
 if __name__ == '__main__':
