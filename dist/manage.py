@@ -2,10 +2,13 @@
 import json
 import logging
 import shutil
+import subprocess
 import sys
 import os
 import random
 import string
+import urllib.request
+import xml.etree.ElementTree as ET
 import zipfile
 import tomllib
 # Include the virtual environment site-packages in sys.path
@@ -274,6 +277,53 @@ class GameApp(ManualApp):
 				return version['version']
 		return None
 
+	def get_neoforge_versions_available(self) -> list:
+		"""
+		Get a short list of NeoForge versions available.
+
+		Try the NeoForged Maven metadata first. If that endpoint is unavailable or
+		does not return usable data, fall back to the known-good versions provided
+		for this installer.
+		:return:
+		"""
+		default_versions = [
+			'26.2.0.7-beta',
+			'26.1.2.76',
+		]
+		metadata_url = 'https://maven.neoforged.net/releases/net/neoforged/neoforge/maven-metadata.xml'
+
+		try:
+			with urllib.request.urlopen(metadata_url, timeout=5) as response:
+				root = ET.fromstring(response.read())
+			versions = []
+			for version in root.findall('./versioning/versions/version'):
+				value = version.text.strip() if version.text is not None else ''
+				if value != '':
+					versions.append(value)
+
+			if len(versions) > 0:
+				versions = list(reversed(versions[-30:]))
+				for default_version in reversed(default_versions):
+					if default_version in versions:
+						versions.remove(default_version)
+					versions.insert(0, default_version)
+				return ['none'] + versions
+		except Exception as e:
+			logging.debug('Failed to load NeoForge versions from Maven metadata: %s', e)
+
+		return ['none'] + default_versions
+
+	def get_neoforge_installer_url(self, version: str) -> str:
+		"""
+		Get the NeoForge installer URL for a specific version.
+		:param version:
+		:return:
+		"""
+		return (
+			'https://maven.neoforged.net/releases/net/neoforged/neoforge/'
+			f'{version}/neoforge-{version}-installer.jar'
+		)
+
 	def get_download_url(self, version: str) -> str | None:
 		"""
 		Get the download URL for the server for a specific version.
@@ -343,7 +393,7 @@ class GameService(RCONService):
 			if previous_value:
 				Firewall.remove(int(previous_value), 'udp')
 			Firewall.allow(int(new_value), 'udp', 'Allow %s query port' % self.game.desc)
-		elif option == 'Service Game Version' or option == 'Service Fabric Mod Loader':
+		elif option in ('Service Game Version', 'Service Mod Loader', 'Service Fabric Mod Loader', 'Service NeoForge Version'):
 			# If the game version is updated, we should also update the server to match that version
 			# and change the Java runtime to match the appropriate version for that game version.
 			try:
@@ -352,8 +402,14 @@ class GameService(RCONService):
 				print('WARNING: Failed to find Java installation for game version %s: %s' % (new_value, str(e)), file=sys.stderr)
 			self.update()
 			self.build_systemd_config()
+			self.reload()
+		elif option == 'Service Memory':
+			self.apply_neoforge_runtime_settings()
+			self.build_systemd_config()
+			self.reload()
 		elif option == 'Service Java Path':
 			# If the Java path is updated, generate a new systemd service file.
+			self.apply_neoforge_runtime_settings()
 			self.build_systemd_config()
 			self.reload()
 
@@ -367,8 +423,16 @@ class GameService(RCONService):
 			return self.game.get_versions_available()
 		elif option == 'Service Java Path':
 			return get_java_paths()
+		elif option == 'Service Mod Loader':
+			return ['none', 'fabric', 'neoforge']
 		elif option == 'Service Fabric Mod Loader':
 			return self.game.get_fabric_versions_available()
+		elif option == 'Service NeoForge Version':
+			ret = self.game.get_neoforge_versions_available()
+			current_version = self.get_option_value('Service NeoForge Version')
+			if current_version not in (None, '', 'none') and current_version not in ret:
+				ret.append(current_version)
+			return ret
 		else:
 			return super().get_option_options(option)
 
@@ -513,15 +577,21 @@ class GameService(RCONService):
 		:return:
 		"""
 		binary = 'minecraft_server.jar'
+		loader = self.get_loader()
+		memory = self.get_memory_setting()
 
-		target_fabric_version = self.get_option_value('Service Fabric Mod Loader')
-		if target_fabric_version != 'none':
+		if loader == 'fabric':
+			target_fabric_version = self.get_option_value('Service Fabric Mod Loader')
 			target_version = self.get_target_version()
 			launcher_version = self.game.get_fabric_launcher_version()
 			if launcher_version is not None:
 				binary = 'fabric-server-mc.%s-loader.%s-launcher.%s.jar' % (target_version, target_fabric_version, launcher_version)
+			return '%s -Xmx%s -Xms%s -jar %s nogui' % (self.get_option_value('Service Java Path'), memory, memory, binary)
+		elif loader == 'neoforge':
+			args_file = self.get_neoforge_unix_args_file()
+			return '%s @user_jvm_args.txt @%s nogui' % (self.get_option_value('Service Java Path'), args_file)
 
-		return '%s -Xmx1G -Xms1G -jar %s nogui' % (self.get_option_value('Service Java Path'), binary)
+		return '%s -Xmx%s -Xms%s -jar %s nogui' % (self.get_option_value('Service Java Path'), memory, memory, binary)
 
 	def get_target_version(self) -> str:
 		"""
@@ -638,6 +708,7 @@ class GameService(RCONService):
 
 		# Download the latest version of the game server
 		self.update()
+		self.apply_neoforge_runtime_settings()
 
 	def check_update_available(self) -> bool:
 		"""
@@ -647,7 +718,11 @@ class GameService(RCONService):
 		"""
 		logging.debug('Checking for updates on %s' % self.get_name())
 		version_file = os.path.join(self.get_app_directory(), '.version')
+		loader_type_file = os.path.join(self.get_app_directory(), '.loader-type')
+		loader_version_file = os.path.join(self.get_app_directory(), '.loader-version')
 		target_version = self.get_target_version()
+		loader = self.get_loader()
+		target_loader_version = self.get_target_loader_version()
 
 		if os.path.exists(version_file):
 			with open(version_file, 'r') as f:
@@ -655,10 +730,35 @@ class GameService(RCONService):
 
 			logging.debug('Current version: %s' % current_version)
 			logging.debug('Target version: %s' % target_version)
-			return current_version != target_version
+			if current_version != target_version:
+				return True
 		else:
 			logging.debug('No version file found, assuming update is available.')
 			return True
+
+		current_loader = 'none'
+		current_loader_version = 'none'
+		if os.path.exists(loader_type_file):
+			with open(loader_type_file, 'r') as f:
+				current_loader = f.read().strip() or 'none'
+		if os.path.exists(loader_version_file):
+			with open(loader_version_file, 'r') as f:
+				current_loader_version = f.read().strip() or 'none'
+
+		if current_loader != (loader or 'none') or current_loader_version != target_loader_version:
+			return True
+
+		if loader == 'fabric':
+			target_fabric_version = self.get_option_value('Service Fabric Mod Loader')
+			launcher_version = self.game.get_fabric_launcher_version()
+			if launcher_version is None:
+				return True
+			target_file = 'fabric-server-mc.%s-loader.%s-launcher.%s.jar' % (target_version, target_fabric_version, launcher_version)
+			return not os.path.exists(os.path.join(self.get_app_directory(), target_file))
+		elif loader == 'neoforge':
+			return not os.path.exists(os.path.join(self.get_app_directory(), self.get_neoforge_unix_args_file()))
+		else:
+			return False
 
 	def update(self):
 		"""
@@ -667,14 +767,18 @@ class GameService(RCONService):
 		:return:
 		"""
 		version_file = os.path.join(self.get_app_directory(), '.version')
+		loader_type_file = os.path.join(self.get_app_directory(), '.loader-type')
+		loader_version_file = os.path.join(self.get_app_directory(), '.loader-version')
 		target_version = self.get_target_version()
-		download_url = self.game.get_download_url(target_version)
+		loader = self.get_loader()
+		target_loader_version = self.get_target_loader_version()
+		download_url = None if loader == 'neoforge' else self.game.get_download_url(target_version)
 
 		if not self.is_stopped():
 			logging.error('Cannot update while the server is running.')
 			return False
 
-		if download_url is None:
+		if loader != 'neoforge' and download_url is None:
 			logging.error('Failed to retrieve download URL for latest version.')
 			return False
 
@@ -688,15 +792,17 @@ class GameService(RCONService):
 			logging.info('Minecraft Server is already at the latest version (%s).' % target_version)
 		else:
 			logging.info('Updating Minecraft Server to version %s...' % target_version)
-			download_file(download_url, os.path.join(self.get_app_directory(), 'minecraft_server.jar'))
+			if loader == 'neoforge':
+				logging.info('NeoForge manages the server runtime via its installer for version %s.', self.get_option_value('Service NeoForge Version'))
+			else:
+				download_file(download_url, os.path.join(self.get_app_directory(), 'minecraft_server.jar'))
 
 			with open(version_file, 'w') as f:
 				f.write(target_version)
 			utils.ensure_file_ownership(version_file)
 
-		# Check fabric too
-		target_fabric_version = self.get_option_value('Service Fabric Mod Loader')
-		if target_fabric_version != 'none':
+		if loader == 'fabric':
+			target_fabric_version = self.get_option_value('Service Fabric Mod Loader')
 			launcher_version = self.game.get_fabric_launcher_version()
 			if launcher_version is None:
 				logging.error('Failed to retrieve Fabric launcher version.')
@@ -708,6 +814,50 @@ class GameService(RCONService):
 				download_file(source_file, os.path.join(self.get_app_directory(), target_file))
 			else:
 				logging.info('Fabric server loader %s already exists.' % target_file)
+		elif loader == 'neoforge':
+			target_neoforge_version = self.get_option_value('Service NeoForge Version')
+			if target_neoforge_version in (None, '', 'none'):
+				logging.error('NeoForge selected but no NeoForge version is configured.')
+				return False
+
+			installer_file = os.path.join(
+				self.get_app_directory(),
+				'neoforge-%s-installer.jar' % target_neoforge_version
+			)
+			installer_url = self.game.get_neoforge_installer_url(target_neoforge_version)
+			logging.info('Downloading NeoForge installer %s...', os.path.basename(installer_file))
+			download_file(installer_url, installer_file)
+			utils.ensure_file_ownership(installer_file)
+
+			java_path = self.get_option_value('Service Java Path')
+			cmd = [java_path, '-jar', installer_file, '--installServer']
+			logging.info('Running NeoForge server installer...')
+			try:
+				subprocess.run(cmd, cwd=self.get_app_directory(), check=True)
+			except subprocess.CalledProcessError as e:
+				logging.error('NeoForge installer failed with exit code %s.', e.returncode)
+				return False
+
+			for root, dirs, files in os.walk(self.get_app_directory()):
+				for dirname in dirs:
+					utils.ensure_file_ownership(os.path.join(root, dirname))
+				for filename in files:
+					utils.ensure_file_ownership(os.path.join(root, filename))
+
+			unix_args_file = os.path.join(self.get_app_directory(), self.get_neoforge_unix_args_file())
+			if not os.path.exists(unix_args_file):
+				logging.error('NeoForge installation did not produce %s.', os.path.basename(unix_args_file))
+				return False
+
+			self.apply_neoforge_runtime_settings()
+
+		with open(loader_type_file, 'w') as f:
+			f.write(loader or 'none')
+		utils.ensure_file_ownership(loader_type_file)
+
+		with open(loader_version_file, 'w') as f:
+			f.write(target_loader_version)
+		utils.ensure_file_ownership(loader_version_file)
 		print('Update complete.')
 		return True
 
@@ -748,10 +898,93 @@ class GameService(RCONService):
 
 		:return:
 		"""
-		if self.get_option_value('Service Fabric Mod Loader') != 'none':
+		loader = self.get_option_value('Service Mod Loader')
+		target_fabric_version = self.get_option_value('Service Fabric Mod Loader')
+		target_neoforge_version = self.get_option_value('Service NeoForge Version')
+
+		if loader == 'fabric' and target_fabric_version not in (None, '', 'none'):
 			return 'fabric'
+		elif loader == 'neoforge' and target_neoforge_version not in (None, '', 'none'):
+			return 'neoforge'
+		elif target_fabric_version not in (None, '', 'none'):
+			return 'fabric'
+		elif target_neoforge_version not in (None, '', 'none'):
+			return 'neoforge'
 		else:
 			return None
+
+	def get_target_loader_version(self) -> str:
+		"""
+		Get the configured version string for the active loader.
+		:return:
+		"""
+		loader = self.get_loader()
+		if loader == 'fabric':
+			return self.get_option_value('Service Fabric Mod Loader') or 'none'
+		elif loader == 'neoforge':
+			return self.get_option_value('Service NeoForge Version') or 'none'
+		else:
+			return 'none'
+
+	def get_neoforge_unix_args_file(self) -> str:
+		"""
+		Get the relative path to NeoForge's generated unix args file.
+		:return:
+		"""
+		return 'libraries/net/neoforged/neoforge/%s/unix_args.txt' % self.get_target_loader_version()
+
+	def get_memory_setting(self) -> str:
+		"""
+		Get the configured JVM memory allocation string.
+		:return:
+		"""
+		value = self.get_option_value('Service Memory')
+		if value in (None, ''):
+			return '1G'
+		return str(value).strip()
+
+	def apply_neoforge_runtime_settings(self):
+		"""
+		Apply NeoForge-specific runtime settings after the installer generates its files.
+		:return:
+		"""
+		if self.get_loader() != 'neoforge':
+			return
+
+		run_sh = os.path.join(self.get_app_directory(), 'run.sh')
+		if os.path.exists(run_sh):
+			java_path = self.get_option_value('Service Java Path')
+			lines = []
+			with open(run_sh, 'r') as f:
+				for line in f:
+					if line.startswith('exec java '):
+						line = 'exec "%s" %s' % (java_path, line[len('exec java '):])
+					elif line.startswith('java '):
+						line = 'exec "%s" %s' % (java_path, line[len('java '):])
+					lines.append(line.rstrip('\n'))
+
+			with open(run_sh, 'w') as f:
+				f.write('\n'.join(lines).rstrip() + '\n')
+			utils.ensure_file_ownership(run_sh)
+
+		user_jvm_args = os.path.join(self.get_app_directory(), 'user_jvm_args.txt')
+		if not os.path.exists(user_jvm_args):
+			return
+
+		memory = self.get_memory_setting()
+		lines = []
+		with open(user_jvm_args, 'r') as f:
+			for line in f:
+				if line.startswith('-Xmx') or line.startswith('-Xms'):
+					continue
+				lines.append(line.rstrip('\n'))
+
+		lines.insert(0, '-Xms%s' % memory)
+		lines.insert(0, '-Xmx%s' % memory)
+
+		with open(user_jvm_args, 'w') as f:
+			f.write('\n'.join(lines).rstrip() + '\n')
+		utils.ensure_file_ownership(user_jvm_args)
 
 
 if __name__ == '__main__':

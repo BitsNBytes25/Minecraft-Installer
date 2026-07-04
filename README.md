@@ -2,12 +2,14 @@
 
 An unofficial, open-source installer and management toolkit for deploying and maintaining Minecraft Java Edition servers on Linux. 
 Supports multi-instance management, advanced configuration, and integrates with Warlock Manager for remote administration.
+Supports vanilla, Fabric, and NeoForge server setups.
 
 ---
 
 ### Features
 
 - Automated installation and uninstallation of Minecraft Java Edition servers
+- Supports vanilla, Fabric, and NeoForge loaders
 - Multi-instance support for running multiple servers
 - Advanced configuration options (see `scripts/configs.yaml`)
 - Firewall setup and management (UFW integration)
@@ -103,6 +105,7 @@ Server options are defined in [`scripts/configs.yaml`](scripts/configs.yaml). Ex
 - Enable RCON, Query, Secure Profile, Whitelist, etc.
 - World settings: seed, type, name
 - Management server options: enable, host, port, TLS
+- Loader options: `none`, `fabric`, `neoforge`, plus loader-specific version fields
 
 ---
 
